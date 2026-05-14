@@ -26,6 +26,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -56,6 +57,79 @@ def _patch_state(state_path: Path, **fields) -> dict:
     state["last_activity"] = _now_iso()
     _write_state(state_path, state)
     return state
+
+
+# Intervalo do heartbeat em segundos. Sessão remota silenciosa por mais que
+# isso recebe um "ainda trabalhando" no Telegram pra evitar UX de "morri ou
+# tô vivo?". Override via env KOBE_CODER_HEARTBEAT_SECONDS.
+_DEFAULT_HEARTBEAT_SECONDS = 600  # 10 min
+
+
+def _heartbeat_interval() -> int:
+    raw = os.environ.get("KOBE_CODER_HEARTBEAT_SECONDS", "").strip()
+    if not raw:
+        return _DEFAULT_HEARTBEAT_SECONDS
+    try:
+        return max(60, int(raw))  # mínimo 60s pra não floodar
+    except ValueError:
+        return _DEFAULT_HEARTBEAT_SECONDS
+
+
+def _fmt_elapsed(secs: float) -> str:
+    s = int(secs)
+    h, rem = divmod(s, 3600)
+    m, ss = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    if m:
+        return f"{m}m{ss:02d}s"
+    return f"{ss}s"
+
+
+def _heartbeat_loop(
+    stop_event: threading.Event,
+    interval: int,
+    kobe_home: Path,
+    state_path: Path,
+    started: float,
+    notify_marker: dict,
+) -> None:
+    """Thread daemon: a cada `interval` segundos, se nada de novo aconteceu
+    no log E o sub-claude não emitiu kobe-notify neste turno, manda um
+    'ainda trabalhando' ao operador. Evita silêncio prolongado em turnos
+    longos sem progresso explícito.
+    """
+    notify_bin = kobe_home / "bot" / "bin" / "kobe-notify"
+    if not notify_bin.is_file():
+        return
+    while not stop_event.wait(interval):
+        # Releitura barata do state pra ter short_id e last_text recentes.
+        try:
+            state = _read_state(state_path)
+        except Exception:  # noqa: BLE001
+            continue
+        short = state.get("short_id", "????")
+        elapsed = _fmt_elapsed(time.monotonic() - started)
+        # Se o sub-claude já mandou kobe-notify nesse turno, pula heartbeat
+        # (evita ruído duplicado). O marcador é atualizado pelo run_claude
+        # via heurística de leitura do log.
+        if notify_marker.get("sub_claude_notified", False):
+            continue
+        last = (state.get("last_text") or "").strip()
+        preview = last[:200] + "…" if len(last) > 200 else last
+        msg = (
+            f"⏳ [coder] sessão `{short}` em andamento há {elapsed} — "
+            f"ainda sem progresso explícito.\n"
+            + (f"Última fala interna:\n\n{preview}" if preview else "")
+        )
+        try:
+            subprocess.run(
+                [str(notify_bin), msg],
+                timeout=15,
+                capture_output=True,
+            )
+        except Exception:  # noqa: BLE001 — heartbeat é nice-to-have
+            pass
 
 
 def _notify_error(kobe_home: Path, msg: str) -> None:
@@ -188,6 +262,27 @@ def run_claude(
         # Claude pode ter morrido antes de ler. Vai cair no wait abaixo.
         pass
 
+    # Heartbeat: thread daemon que avisa o operador quando o turno tá
+    # silencioso há muito tempo. Compartilha `notify_marker` (dict mutável)
+    # com o loop principal — quando detectamos que o sub-claude chamou
+    # kobe-notify via Bash, marcamos a flag pra suprimir heartbeat duplicado.
+    notify_marker = {"sub_claude_notified": False}
+    turn_started = time.monotonic()
+    hb_stop = threading.Event()
+    hb_thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(
+            hb_stop,
+            _heartbeat_interval(),
+            kobe_home,
+            state_path,
+            turn_started,
+            notify_marker,
+        ),
+        daemon=True,
+    )
+    hb_thread.start()
+
     # Consome stream-json linha por linha. Atualiza state periodicamente.
     last_text: str | None = state.get("last_text")
     last_persist_ts = 0.0
@@ -195,8 +290,16 @@ def run_claude(
     assistant_texts: list[str] = []
     assert proc.stdout is not None
     for raw_line in proc.stdout:
-        log_fh.write(raw_line.decode("utf-8", errors="replace"))
+        decoded = raw_line.decode("utf-8", errors="replace")
+        log_fh.write(decoded)
         log_fh.flush()
+        # Detecta chamada do sub-claude a kobe-notify/attach via Bash —
+        # quando aparece, suprime heartbeat (sub-claude já está se
+        # comunicando). Heurística textual barata, sem regex pesado.
+        if not notify_marker["sub_claude_notified"] and (
+            "kobe-notify" in decoded or "kobe-attach" in decoded
+        ):
+            notify_marker["sub_claude_notified"] = True
         line = raw_line.strip()
         if not line:
             continue
@@ -225,6 +328,10 @@ def run_claude(
             except Exception:  # noqa: BLE001
                 logger.exception("falha atualizando state durante stream")
             last_persist_ts = now
+
+    # Para o heartbeat (sub-claude terminou o turno).
+    hb_stop.set()
+    hb_thread.join(timeout=2)
 
     proc.wait()
     exit_code = proc.returncode

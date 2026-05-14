@@ -64,6 +64,65 @@ def _emit(payload: dict, *, error: bool = False) -> int:
     return 0
 
 
+# Limite global default de sessões coder simultâneas (somatório de todos os
+# tópicos). Cada sessão = processo `claude -p` extra + tokens Anthropic por
+# turno. Limite protege contra explosão de custo em rajada de pedidos.
+# Override via env `KOBE_CODER_MAX_CONCURRENT=N`. N=0 desativa o limite.
+_DEFAULT_MAX_CONCURRENT = 3
+
+
+def _max_concurrent() -> int:
+    raw = os.environ.get("KOBE_CODER_MAX_CONCURRENT", "").strip()
+    if not raw:
+        return _DEFAULT_MAX_CONCURRENT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _DEFAULT_MAX_CONCURRENT
+
+
+def _count_active_sessions_global(kobe_home: Path) -> tuple[int, list[dict]]:
+    """Conta sessões em status `starting` ou `running` em TODOS os tópicos.
+
+    Faz crash detection inline (PID inexistente = não conta). Retorna
+    (contagem, lista_de_dicts_com_short_id+topic+cwd+mission) — útil pra
+    o caller construir mensagem de erro informativa.
+    """
+    base = _sessions_dir(kobe_home)
+    active: list[dict] = []
+    if not base.is_dir():
+        return 0, active
+    for tdir in base.iterdir():
+        if not tdir.is_dir():
+            continue
+        for state_file in tdir.glob("*.json"):
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            status = data.get("status")
+            if status not in ("starting", "running"):
+                continue
+            pid = data.get("pid") or data.get("worker_pid")
+            if pid:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    # processo sumiu — não conta como ativo
+                    continue
+                except OSError:
+                    continue
+            active.append(
+                {
+                    "short_id": data.get("short_id", ""),
+                    "topic_key": data.get("topic_key", tdir.name),
+                    "cwd": data.get("cwd", ""),
+                    "mission": (data.get("mission") or "")[:80],
+                }
+            )
+    return len(active), active
+
+
 def _list_sessions(topic_dir: Path) -> list[dict]:
     if not topic_dir.is_dir():
         return []
@@ -130,6 +189,29 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     if not mission:
         return _emit({"error": "missão vazia"}, error=True)
+
+    # Limite global de sessões concorrentes — protege contra explosão de
+    # custo Anthropic em rajada. Override via env KOBE_CODER_MAX_CONCURRENT.
+    max_concurrent = _max_concurrent()
+    if max_concurrent > 0:
+        count, active = _count_active_sessions_global(kobe_home)
+        if count >= max_concurrent:
+            return _emit(
+                {
+                    "error": (
+                        f"limite de {max_concurrent} sessão(ões) coder ativas "
+                        f"atingido. Sessões em execução: "
+                        + ", ".join(
+                            f"{s['short_id']}@{s['topic_key']}" for s in active
+                        )
+                        + ". Aguarde uma terminar ou ajuste KOBE_CODER_MAX_CONCURRENT."
+                    ),
+                    "active_count": count,
+                    "max_concurrent": max_concurrent,
+                    "active_sessions": active,
+                },
+                error=True,
+            )
 
     session_id = str(uuid.uuid4())
     short = session_id[:8]

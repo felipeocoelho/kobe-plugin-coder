@@ -7,7 +7,14 @@ triggers:
   - "operador pede pra implementar/codar/refatorar/fazer fix em algum projeto na VPS"
   - "operador pede pra continuar trabalho de dev iniciado antes (resume da sessão coder ativa)"
   - "operador pede status de sessão remota em andamento"
-  - "comando textual `/coder <missão>` (dispara nova sessão) ou `/coder-status` (lista sessões do tópico)"
+  - "comando `/coder <missão>` (dispara nova sessão)"
+  - "comando `/coder_status` (lista sessões do tópico)"
+  - "também aceita a variante com hífen `/coder-status` por retrocompat"
+slash_commands:
+  - name: coder
+    description: "Dispara sessão remota de Claude Code com uma missão"
+  - name: coder_status
+    description: "Lista sessões coder ativas/idle do tópico atual"
 agent_definition: claude/agents/coder.md
 dependencies:
   python: []

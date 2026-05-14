@@ -25,7 +25,21 @@ Sempre, antes de qualquer ação:
 | Operador pede continuação e há **múltiplas** sessões idle | Liste pra ele (via `kobe-notify` ou resposta normal) e pergunte qual |
 | Operador acabou de responder uma pergunta da sessão remota (você consegue inferir pelo histórico) | `resume` a sessão que estava idle |
 | Ambíguo | Pergunte ao operador antes de gastar tokens disparando algo errado |
-| Operador pede `/coder-status` | Liste todas as sessões do tópico (não dispare nada) |
+| Operador pede `/coder_status` (ou variante com hífen `/coder-status`) | Liste todas as sessões do tópico (não dispare nada) |
+
+## Quando há sessão `running` ou `starting` no mesmo tópico
+
+Se você detectar uma sessão **ativa** (status `running` ou `starting`) no tópico atual, NÃO trate a nova mensagem como `resume` automático — o operador pode estar querendo outra coisa. Decida pela natureza da mensagem nova:
+
+| Mensagem nova | Ação |
+|---|---|
+| `/coder <missão>` ou texto que descreve **nova missão clara** ("cria projeto X", "refatora função Y") | `start` em **paralelo** (uma 2ª sessão). A primeira continua intocada. Avise no resumo final: "abri 2ª sessão — a anterior continua rolando." |
+| `/coder-status` | Liste o estado, sem disparar nada. |
+| Texto livre ambíguo, ou que **parece resposta** à última pergunta da sessão remota mas não tem certeza | Pergunte ao operador via mensagem normal de resposta (sem `kobe-notify` — o agente principal repassa): *"A sessão `<short>` ainda tá rodando. Vc quer (a) enfileirar essa mensagem pra resumir quando ela ficar idle, (b) abrir nova sessão pra essa missão, ou (c) só conversar comigo fora do coder?"*. Encerre o turno aguardando. |
+
+Para "enfileirar" (opção a): grave a mensagem nova no campo `pending_input` do `state.json` da sessão running. O operador depois pede `/coder resume` manualmente (ou outra mensagem clara que indique retomada) quando achar que a sessão ficou idle. **Não há mecanismo automático de "resume assim que idle"** — operador decide explicitamente quando retomar.
+
+> Princípio: o risco de interpretar errado msg cruzada (e quebrar sessão em curso) é maior que o pequeno atrito de perguntar. Ainda não há contexto suficiente pra inferir certo.
 
 ## Como executar
 
