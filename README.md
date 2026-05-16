@@ -37,11 +37,27 @@ A memória entre turnos é preservada pelo próprio Claude Code via `--session-i
 
 | Comando | Efeito |
 |---|---|
-| `/coder <missão>` | Dispara nova sessão. |
-| `/coder-status` | Lista sessões do tópico atual com status e idade. |
+| `/coder <missão>` | Dispara nova sessão. Sessão remota produz plano em anexo antes de codar (a partir de v0.2.0). |
+| `/coder_status` (ou `/coder-status`) | Lista sessões do tópico **e** instâncias Claude Code ativas cross-tópico (presença global). |
 | Texto livre tipo "continua o que estava fazendo no projeto X" | Subagente busca sessão idle do tópico e retoma. |
 
 O subagente coder decide entre `start` e `resume` lendo o estado das sessões em `user-data/coder-sessions/<topic>/` e o contexto da mensagem.
+
+### Plano antes de codar (v0.2.0+)
+
+Em missão nova não-trivial, a sessão remota:
+
+1. Lê o contexto e escreve `.local/plano-<slug>.md` na cwd do projeto.
+2. Anexa o plano via Telegram (`kobe-attach`).
+3. **Para** o turno aguardando aprovação do operador.
+
+O operador lê pelo Telegram (ou baixa, ou abre no Claude Code local), aprova ou pede ajustes. Só depois a sessão executa, marcando o checklist `- [ ]` → `- [x]` conforme avança e mandando `kobe-notify` curto a cada marco.
+
+Tarefas triviais (1-liner, typo, rename simples) podem pular o plano — a sessão decide e avisa.
+
+### Aviso de pasta ocupada (v0.2.0+)
+
+Antes de spawnar a sessão remota, o `run_remote.py start` consulta o registro de presença. Se outra instância Claude Code já está na mesma cwd, retorna `warning: presence_conflict` sem disparar nada. O subagente pergunta ao operador pelo Telegram; resposta afirmativa faz reinvocar com `--force`.
 
 ## Estado
 
@@ -83,6 +99,58 @@ KOBE_HOME=$PWD python plugins/public/coder/scripts/run_remote.py status --sessio
 ```
 
 Saída é sempre JSON no stdout.
+
+## Sistema de presença
+
+Pasta: `$KOBE_HOME/user-data/claude-presence/<pid>.json`. Cada instância Claude Code grava ao iniciar, remove ao terminar. Formato:
+
+```json
+{
+  "pid": 12345,
+  "cwd": "/home/felipe/projetos/foo",
+  "session_id": "uuid-ou-null",
+  "source": "telegram-coder",
+  "topic_key": "general",
+  "started_at": "2026-05-16T12:34:56+00:00"
+}
+```
+
+Cleanup é inline: toda função que LÊ a pasta faz `kill -0 <pid>` em cada arquivo e remove os órfãos. PID morto nunca confunde resultado.
+
+A sessão remota disparada pelo plugin registra `source=telegram-coder` automaticamente — sem ação do operador.
+
+### Hook opcional pra o Claude Code local
+
+Pra o claude local do operador também aparecer no `/coder_status`, adicione no `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "KOBE_HOME=$HOME/kobe python3 $HOME/kobe/plugins/public/coder/scripts/presence.py register --source local-claude --cwd \"$PWD\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "KOBE_HOME=$HOME/kobe python3 $HOME/kobe/plugins/public/coder/scripts/presence.py unregister"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Ajuste o `KOBE_HOME` e o path do plugin conforme sua instalação. Hook é opcional — sem ele, o claude local não aparece no status (o resto do plugin continua funcionando normalmente).
 
 ## Convenções da sessão remota
 

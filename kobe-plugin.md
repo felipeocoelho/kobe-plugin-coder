@@ -1,8 +1,8 @@
 ---
 name: coder
 visibility: public
-version: 0.1.0
-description: "Dispara sessões remotas de Claude Code em background na VPS — modo dev assíncrono via Telegram. O subagente recebe a missão, lança um `claude -p` em modo bypassPermissions no diretório do projeto, e devolve o controle imediatamente. A sessão remota trabalha sozinha, manda updates via kobe-notify e encerra o turno quando precisa de input ou conclui. Mensagens novas do operador no mesmo tópico podem ser repassadas pra sessão via `claude --resume <session-id>`, preservando a memória. Estado em `user-data/coder-sessions/<topic>/<session>.json`."
+version: 0.2.0
+description: "Dispara sessões remotas de Claude Code em background na VPS — modo dev assíncrono via Telegram. A sessão remota recebe a missão, produz um plano em anexo (`.local/plano-*.md`) e PARA aguardando aprovação do operador antes de codar. Após OK, executa marcando checklist vivo conforme avança, com `kobe-notify` a cada marco. Estado em `user-data/coder-sessions/<topic>/<session>.json`; presença global em `user-data/claude-presence/<pid>.json`. Antes de disparar, avisa (não bloqueia) se já há instância Claude Code ativa na mesma cwd."
 triggers:
   - "operador pede pra implementar/codar/refatorar/fazer fix em algum projeto na VPS"
   - "operador pede pra continuar trabalho de dev iniciado antes (resume da sessão coder ativa)"
@@ -61,8 +61,8 @@ Cada sessão tem um `state.json` em `$KOBE_HOME/user-data/coder-sessions/<topic-
 
 | Comando | Efeito |
 |---|---|
-| `/coder <missão>` | Dispara nova sessão. Subagente decide cwd a partir da missão (pergunta se ambíguo). |
-| `/coder-status` | Lista sessões ativas/idle do tópico atual. |
+| `/coder <missão>` | Dispara nova sessão. Sessão remota produz plano em anexo antes de codar. |
+| `/coder_status` (ou `/coder-status`) | Lista sessões coder do tópico **e** presenças globais (instâncias Claude Code ativas cross-tópico). |
 | Texto livre como "continua o que tava fazendo no projeto X" | Subagente busca sessão idle do tópico e resume. |
 
 ## Como a sessão remota se comunica
