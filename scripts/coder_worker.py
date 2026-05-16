@@ -31,6 +31,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Import local — `presence.py` mora no mesmo diretório que este worker.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import presence  # noqa: E402
+
 
 logger = logging.getLogger("coder.worker")
 
@@ -253,6 +257,21 @@ def run_claude(
     # Atualiza state com PID — pra crash detection futura.
     _patch_state(state_path, pid=proc.pid)
 
+    # Registra presença do sub-claude na pasta global de instâncias ativas.
+    # PID registrado é o do `claude` (não do worker), pra `/coder_status` e
+    # avisos de conflito apontarem o processo certo. Falha silenciosa: se
+    # algo der ruim aqui, o turno continua — presença é metadado, não trava.
+    try:
+        presence.register(
+            source="telegram-coder",
+            cwd=state["cwd"],
+            session_id=session_id,
+            topic_key=state.get("topic_key"),
+            pid=proc.pid,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("falha registrando presença do sub-claude")
+
     # Manda o prompt via stdin e fecha.
     assert proc.stdin is not None
     try:
@@ -282,6 +301,11 @@ def run_claude(
         daemon=True,
     )
     hb_thread.start()
+
+    # `claude_pid` capturado pra desregistrar presença no fim do turno.
+    # Se algo explodir no meio, cleanup inline da `presence.list_active()`
+    # vai remover o órfão na próxima leitura (PID do claude já morreu junto).
+    claude_pid = proc.pid
 
     # Consome stream-json linha por linha. Atualiza state periodicamente.
     last_text: str | None = state.get("last_text")
@@ -383,6 +407,13 @@ def run_claude(
                 f"(exit={exit_code}). Veja `{state['log_path']}` pra detalhes."
             ),
         )
+
+    # Desregistra presença do sub-claude. Falha silenciosa — o PID já saiu,
+    # então mesmo se o unlink falhar, cleanup inline futuro limpa.
+    try:
+        presence.unregister(pid=claude_pid)
+    except Exception:  # noqa: BLE001
+        logger.exception("falha desregistrando presença do sub-claude")
 
     return exit_code
 
