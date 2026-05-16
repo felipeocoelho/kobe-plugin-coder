@@ -379,10 +379,22 @@ def cmd_list(args: argparse.Namespace) -> int:
             for tdir in sorted(base.iterdir()):
                 if tdir.is_dir():
                     all_sessions.extend(_list_sessions(tdir))
-        return _emit({"sessions": all_sessions, "topic_key": "<all>"})
-    topic_dir = _sessions_dir(kobe_home, topic_key)
-    sessions = _list_sessions(topic_dir)
-    return _emit({"sessions": sessions, "topic_key": topic_key})
+        payload: dict = {"sessions": all_sessions, "topic_key": "<all>"}
+    else:
+        topic_dir = _sessions_dir(kobe_home, topic_key)
+        sessions = _list_sessions(topic_dir)
+        payload = {"sessions": sessions, "topic_key": topic_key}
+
+    # Presenças globais (cross-tópico): operador quer visão tipo `v$session`,
+    # não só do tópico atual. Cleanup inline na `list_active`. Flag
+    # --no-presence existe pra suprimir quando o consumidor só quer sessões.
+    if args.include_presence:
+        try:
+            payload["presences"] = presence.list_active(kobe_home=kobe_home)
+        except Exception as exc:  # noqa: BLE001
+            payload["presences"] = []
+            payload["presences_error"] = str(exc)
+    return _emit(payload)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -418,7 +430,13 @@ def main() -> int:
 
     l = sub.add_parser("list", help="lista sessões do tópico atual")
     l.add_argument("--all", action="store_true", help="lista todos os tópicos")
-    l.set_defaults(func=cmd_list)
+    l.add_argument(
+        "--no-presence",
+        dest="include_presence",
+        action="store_false",
+        help="omite a lista de presenças globais (default: incluir).",
+    )
+    l.set_defaults(func=cmd_list, include_presence=True)
 
     st = sub.add_parser("status", help="detalhe de uma sessão")
     st.add_argument("--session", required=True)
