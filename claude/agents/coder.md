@@ -79,14 +79,64 @@ Retorne ao agente principal uma resposta curta, do tipo:
 
 O agente principal repassa isso ao operador. **Não** acumule output do claude remoto na sua resposta — ele se comunica direto via kobe-notify.
 
-## Em `/coder-status`
+Aviso ao operador (texto inline ou via agente principal) sobre o que esperar:
 
-Retorne uma tabela curta (ou bullets) com cada sessão do tópico:
+> A sessão remota vai primeiro produzir um plano em anexo (`.local/plano-<slug>.md`) e parar aguardando sua aprovação. Não vai sair codando direto. Você lê o plano pelo Telegram, manda OK ou ajustes, e aí ela executa marcando checklist conforme avança.
+
+(Pular esse aviso se o operador já pediu explicitamente pra pular o plano — ex: missão de 1-liner óbvio.)
+
+## Lidando com `warning: presence_conflict` do `run_remote.py start`
+
+O `start` checa se já há outra instância Claude Code na mesma cwd. Se houver, retorna **sem disparar** com payload tipo:
+
+```json
+{
+  "warning": "presence_conflict",
+  "cwd": "/path",
+  "active": [{"pid": 1234, "source": "local-claude", "session_id": null, "started_at": "...", "topic_key": null}],
+  "message": "..."
+}
+```
+
+Nesse caso:
+
+1. NÃO grave nada, NÃO chame de novo.
+2. Mande **um** `kobe-notify` claro pro operador:
+   > ⚠️ [coder] já tem instância Claude Code ativa em `<cwd>` (pid X, source Y, há N min). Disparar a sessão coder mesmo assim? Responda **sim** pra prosseguir, **não** pra cancelar.
+3. Encerre o turno aguardando resposta.
+
+Quando o operador retomar:
+
+| Resposta dele | Ação |
+|---|---|
+| "sim", "manda", "pode", "vai", "ok", "tá", "force", "go" | Reinvoque `run_remote.py start --force ...` com **mesmos** `--cwd` e `--mission` originais. |
+| "não", "cancela", "deixa pra lá", "espera" | Não dispare. Confirme cancelamento ao operador via mensagem normal. |
+| Texto que parece nova missão | Trate como nova missão (resolva o `cwd` de novo, etc.) — pode ser que ele tenha mudado de ideia. |
+| Ambíguo | Pergunte de novo, curto: "manda ou cancela?" |
+
+## Em `/coder-status` (ou `/coder_status`)
+
+Chame `run_remote.py list` — o payload retorna **sessões coder do tópico** e **presenças globais** (instâncias Claude Code ativas cross-tópico, incluindo claude local do operador se ele tiver o hook ativo).
+
+Monte resposta em dois blocos:
+
+**📂 Sessões coder neste tópico** (do campo `sessions`):
 - ID curto (primeiros 8 chars do uuid)
 - status
-- cwd
+- cwd (compacta `$HOME` pra `~`)
 - missão (truncada em 60 chars)
 - idade (`last_activity` → "há X min")
+
+Se a lista for vazia, diga "nenhuma sessão coder neste tópico".
+
+**🧑‍💻 Instâncias Claude Code ativas** (do campo `presences`):
+- PID
+- source (`telegram-coder`, `local-claude`, etc.)
+- cwd (compactada)
+- idade (`started_at` → "há X min")
+- session_id curto se houver
+
+Se a lista de presenças for vazia, omita o bloco (operador não precisa de "ninguém ativo" redundante).
 
 ## Ao precisar perguntar algo ao operador
 
