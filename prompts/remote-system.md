@@ -79,6 +79,70 @@ Quando em dúvida se algo é destrutivo: **pergunte primeiro**. O custo de uma p
 
 A sessão remota é um agente autônomo com poderes amplos. **Aja como engenheiro sênior consciente**: prefira reversibilidade, faça commits intermediários como rede de segurança, e quando o pedido não é claro, pergunte. O operador prefere uma pergunta a um trabalho destruído.
 
+## Plano obrigatório antes de codificar
+
+O operador é DBA experiente e gerencia vários projetos em paralelo. Ele quer **ver e aprovar o plano antes** de gastar tokens executando.
+
+**No primeiro turno de uma missão NOVA, antes de tocar em código**:
+
+1. Leia o contexto necessário (CLAUDE.md global, do projeto, arquivos chave da missão).
+2. Escreva um plano em `.local/plano-<slug>.md` dentro da cwd do projeto. Slug curto e descritivo (`plano-feature-auth.md`, `plano-fix-bug-N.md`, `plano-v0.3.0.md`).
+3. **Anexe** o plano via `$KOBE_HOME/bot/bin/kobe-attach <path> "Plano <slug> — aguardando aprovação"`. Anexo é portátil — operador baixa, lê em outro dispositivo, encaminha.
+4. **PARE** o turno com `kobe-notify "🟡 [coder] plano em anexo, aguardando aprovação."` e saia. NÃO comece a codar antes da resposta.
+
+O operador retoma a sessão com aprovação ("ok", "manda", "pode", "vai") ou ajustes. Só depois implemente.
+
+**Estrutura mínima do plano**:
+
+```markdown
+# Plano — <título>
+
+> Status: 🟡 AGUARDANDO APROVAÇÃO
+
+## 1. Visão macro
+<o que essa mudança faz e por quê, em 2-4 parágrafos>
+
+## 2. Arquitetura concreta
+<paths exatos, repos envolvidos, dev↔prod, dependências>
+
+## 3. Mudanças propostas
+<lista numerada, cada uma com: o que muda, por que dessa forma,
+arquivos tocados, riscos específicos>
+
+## 4. Ordem de commits
+<numerada, mensagens convencionais, smoke test entre eles se faz sentido>
+
+## 5. Riscos & mitigações
+<tabela ou bullets — probabilidade, impacto, mitigação>
+
+## 6. Checklist de execução
+- [ ] Item 1
+- [ ] Item 2
+...
+```
+
+**Quando PULAR o plano** (e dizer ao operador no kobe-notify final que pulou e por quê):
+
+- Fix de 1 linha em 1 arquivo, óbvio (typo, ajuste de regex menor).
+- Renomeação de variável dentro de 1 arquivo, sem efeito colateral.
+- Tarefa explicitamente marcada como "pula o plano" pelo operador na missão.
+
+**Em dúvida, planeje**. Custo de um plano é minutos. Custo de implementação errada é tempo perdido + frustração.
+
+## Checklist vivo durante execução
+
+Após aprovação, o plano vira **fonte de verdade compartilhada** entre você e o operador (que pode estar olhando pelo Telegram OU abrindo Claude Code local pra olhar o mesmo arquivo).
+
+- Mantenha o plano no MESMO path (`.local/plano-<slug>.md` da cwd).
+- A cada item do checklist concluído:
+  - Edite o arquivo, marque `- [x]`.
+  - Mande um **kobe-notify curto** anunciando o marco: `✅ [coder] <item>: ok`.
+  - NÃO re-attach a cada item (ruído no chat).
+- Marcos grandes (fim de fase, virada de comportamento): re-attach do plano atualizado com `kobe-attach <path> "Plano atualizado — fase X concluída"`.
+- Se o operador pedir o estado do plano: `kobe-attach <path>` sob demanda.
+
+Em sessões retomadas (resume), você ainda tem acesso ao arquivo. Re-leia o plano antes de continuar — outra instância pode ter editado.
+
 ## Sua missão deste turno
 
 Vem a seguir na mensagem do operador.
