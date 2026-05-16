@@ -27,6 +27,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# Import local — `presence.py` mora no mesmo diretório que este script.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import presence  # noqa: E402
+
 
 def _kobe_home() -> Path:
     raw = os.environ.get("KOBE_HOME")
@@ -189,6 +193,38 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     if not mission:
         return _emit({"error": "missão vazia"}, error=True)
+
+    # Aviso (não bloqueio) de pasta ocupada — outra instância Claude Code já
+    # está mexendo nessa cwd? Retorna `warning: presence_conflict` e não
+    # dispara. Subagente coder propaga via kobe-notify pro operador decidir.
+    # Bypass: --force (operador confirmou explicitamente).
+    if not args.force:
+        try:
+            conflicts = presence.find_by_cwd(str(cwd))
+        except Exception:  # noqa: BLE001 — presença é nice-to-have
+            conflicts = []
+        if conflicts:
+            return _emit(
+                {
+                    "warning": "presence_conflict",
+                    "cwd": str(cwd),
+                    "active": [
+                        {
+                            "pid": c.get("pid"),
+                            "source": c.get("source"),
+                            "session_id": c.get("session_id"),
+                            "started_at": c.get("started_at"),
+                            "topic_key": c.get("topic_key"),
+                        }
+                        for c in conflicts
+                    ],
+                    "message": (
+                        "Já existe instância Claude Code ativa nessa cwd. "
+                        "Confirme com o operador antes de disparar. "
+                        "Reinvoque com --force pra prosseguir."
+                    ),
+                }
+            )
 
     # Limite global de sessões concorrentes — protege contra explosão de
     # custo Anthropic em rajada. Override via env KOBE_CODER_MAX_CONCURRENT.
@@ -368,6 +404,11 @@ def main() -> int:
     s = sub.add_parser("start", help="dispara nova sessão remota")
     s.add_argument("--cwd", required=True, help="diretório onde o claude vai rodar")
     s.add_argument("--mission", required=True, help="texto da missão pra sessão")
+    s.add_argument(
+        "--force",
+        action="store_true",
+        help="pula aviso de pasta ocupada (use quando o operador confirmou).",
+    )
     s.set_defaults(func=cmd_start)
 
     r = sub.add_parser("resume", help="retoma sessão existente com novo input")
