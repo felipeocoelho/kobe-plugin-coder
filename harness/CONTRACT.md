@@ -217,7 +217,8 @@ Cada passo do ritual é um checkpoint que o código *deve forçar* (não dá par
 | Enforcement de conflito (sinalizou → HALT) | ✅ Fase 1 | Crivo de revisão multi-lente |
 | Isolamento por worktree + lock de merge (flag, default off) | ✅ Fase 1 | Decidir *quando* um marco foi atingido |
 | Gate de teste (§2, etapa 4) — *indecidível por código* | ⏳ obrigação | Desenhar o plano de testes e julgar a cobertura |
-| Mecânica de deploy (comandos git, ordem dos 4 ambientes) | ⏳ Fase 2 | Redigir o plano que passa pelo rito |
+| Gate do passo público de deploy (push pro remote público, §10) | ✅ Fase 2 | Executar a ordem dos 4 ambientes (comandos git, lendo C) |
+| Marcos de deploy (rastreio de estágio) / quarentena de vocabulário | ⏳ obrigação | Redigir o aviso de cada marco; resolver o termo ambíguo no contexto |
 
 > **Sobre o gate de teste:** "testou ou não" não é decidível por código (não dá pra um hook saber se os testes certos rodaram e cobriram o risco). Por isso ele **fica como obrigação dura sua** (§2.4), reforçada indiretamente: o gate de changelog exige o campo `Testes:` preenchido em cada entrada, então um commit que fecha trabalho sem relatar teste fica visível na auditoria.
 
@@ -226,6 +227,7 @@ Cada passo do ritual é um checkpoint que o código *deve forçar* (não dá par
 > - Um `git commit` sem arquivo de changelog no staged diff é **negado**. Atualize o CHANGELOG e dê `git add` antes. Para um commit-rede-de-segurança intermediário, inclua **`[wip]`** na mensagem (passa sem changelog, fica auditável).
 > - Antes da aprovação do plano, **editar código de produção é negado** (rascunhos em `.local/` são livres). Escreva o plano, anexe, e espere o OK.
 > - Ao detectar um conflito de regras irreconciliável (§7.1), **nomeie o conflito num `kobe-notify` e encerre o turno** aguardando o operador arbitrar. Se o operador (ou o Hal) decidir congelar a sessão, ela entra em **HALT** e toda ação mutante é negada até a arbitragem — mas você ainda pode usar `kobe-notify` pra explicar.
+> - O **push pro remote público** (passo final de deploy, §10) é **negado** até o operador aprovar, quando o projeto declara um remote público (`KOBE_CODER_PUBLIC_REMOTES`). Os passos intermediários (push pro repo dev, etc.) rodam normal; ao chegar no público, **pare, mostre o que vai ser publicado, e aguarde o OK**.
 
 ---
 

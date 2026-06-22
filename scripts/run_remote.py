@@ -402,6 +402,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         # HALT (§7.1): conflito de regras irreconciliável trava a sessão.
         "halted": False,
         "halt_reason": None,
+        # Gate de deploy (§10): push pro remote público exige OK. Liberado por
+        # --approve-deploy (operador aprovou o passo final que toca o público).
+        "deploy_approved": False,
         # Isolamento por worktree (§13.1) — campos nulos quando desligado.
         **worktree_fields,
     }
@@ -467,6 +470,9 @@ def cmd_resume(args: argparse.Namespace) -> int:
     # trava é código. Sticky: uma vez aprovado, segue aprovado.
     if getattr(args, "approve_plan", False):
         state["plan_approved"] = True
+    # Aprovação do deploy público (§10): libera o gate do push pro remote público.
+    if getattr(args, "approve_deploy", False):
+        state["deploy_approved"] = True
     # Arbitragem de conflito (§7.1): operador resolveu o HALT → destrava.
     if getattr(args, "clear_halt", False):
         state["halted"] = False
@@ -720,6 +726,13 @@ def main() -> int:
         dest="clear_halt",
         action="store_true",
         help="o operador arbitrou o conflito — destrava a sessão (limpa HALT).",
+    )
+    r.add_argument(
+        "--approve-deploy",
+        dest="approve_deploy",
+        action="store_true",
+        help="o operador aprovou o passo final de deploy (push pro remote "
+        "público) — libera o gate de deploy.",
     )
     r.set_defaults(func=cmd_resume)
 

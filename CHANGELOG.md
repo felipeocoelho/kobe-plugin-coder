@@ -4,6 +4,24 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > **A partir de v0.3.0** o changelog segue o **formato auditável** do harness do Coder (§6 do `harness/CONTRACT.md`): cada mudança registra *o que o operador pediu*, *por quê*, *o que foi feito*, *o que foi testado*, *os commits* e *como reverter*. É a trilha de auditoria da codificação — auditoria, reversibilidade e teste no mesmo lugar. Entradas anteriores seguem o [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.0] — 2026-06-22 — Ritual de execução + gate do deploy público (Fase 2 do upgrade)
+
+**Operador pediu:** seguir o plano-mestre V3 implementando a Fase 2 — o ritual de execução e reporte que faz o Coder "voltar a ser usável" (MVP) — sob o rito de quatro etapas.
+
+**Por quê:** a Fase 2 fecha o MVP: o operador fala "coda X" e o ritual inteiro (brief → plano → PARA-e-espera → executa marcando checklist → revisa/testa → changelog → entrega) acontece sozinho, com o passo final de deploy que toca usuário público atrás de um gate de aprovação.
+
+**Foi feito:**
+- **Gate do passo público de deploy** (`guard.py`, `KOBE_CODER_GATE_DEPLOY` default on): `git push` pro remote público (declarado em `KOBE_CODER_PUBLIC_REMOTES`, ex.: `prod`) é **negado** até o operador aprovar (§10). Liberado por `--approve-deploy` no resume (estado `deploy_approved`). Default sem config = gate inativo (zero falso-positivo). Os passos intermediários (push pro repo dev) rodam normal.
+- **Agent def** atualizado: o Hal passa `--approve-deploy` quando o operador autoriza publicar.
+- **CONTRACT §8** atualizado: gate de deploy marcado ✅ Fase 2; marcos de deploy e quarentena de vocabulário marcados como obrigação (LLM).
+- **Já estava no harness desde v0.2.0/Fase 0-1** (a Fase 2 formaliza, não reconstrói): brief automático (plano em anexo antes de codar), checklist vivo persistido, dois tipos de marco via `kobe-notify` (§10.1), mecânica de testes em dev VPS (rito §2 + gate de changelog exigindo o campo Testes), modelo de deploy 4-ambientes via git (§9), quarentena de vocabulário (§5.3).
+
+**Testes (dev VPS):** suíte do deploy gate (push público sem/com aprovação, remote não-público, sem config → inativo) + regressão completa da suíte do guard (~70 casos) — todos passaram. Self-review (advogado do diabo): push por URL em vez de nome de remote contornaria o gate — limitação conhecida do modelo name-based, aceitável (sessões empurram por nome de remote).
+
+**Commits:** v0.5.0 (ver `git log`).
+
+**Reversão:** aditiva. Rollback = `git revert` do commit de v0.5.0. O gate desliga por env (`KOBE_CODER_GATE_DEPLOY=false`) e já nasce inativo sem `KOBE_CODER_PUBLIC_REMOTES`.
+
 ## [0.4.0] — 2026-06-22 — Gates determinísticos + isolamento por worktree (Fase 1 do upgrade)
 
 **Operador pediu:** seguir o plano-mestre V3 implementando a Fase 1 — as travas de código (o "trilho antes do trem") — sob o rito de quatro etapas, com revisão adversarial multi-agente.

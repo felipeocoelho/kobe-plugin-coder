@@ -73,6 +73,7 @@ A sessão remota roda sob travas de código (hook `guard`): deny-list de destrut
   **Sem `--approve-plan`, o gate continua bloqueando a edição de código e a sessão trava sem conseguir trabalhar.** A detecção da aprovação é teu julgamento (LLM); a liberação do gate é código. Na dúvida se a mensagem é aprovação ou só comentário, NÃO passe a flag (melhor a sessão pedir de novo que codar sem OK).
 - **Missão trivial / operador pediu pra pular o plano.** Se a missão já vem com "pula o plano" ou é um 1-liner óbvio, passe `--approve-plan` **no start** (`start ... --approve-plan`) — libera o gate desde o começo.
 - **Arbitragem de conflito (HALT).** Se a sessão entrou em HALT (conflito de regras, §7.1) e o operador arbitrou, retome com `--clear-halt` (pode combinar com `--approve-plan`).
+- **Aprovação do deploy público.** Quando a sessão parou no passo final de deploy (push pro remote público, gated) e o operador aprova publicar, retome com `--approve-deploy`. Só passe quando o operador claramente autorizou tocar o usuário público.
 
 `--approve-plan` é **sticky**: uma vez aprovado, segue aprovado nos resumes seguintes daquela sessão.
 

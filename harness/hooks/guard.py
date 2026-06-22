@@ -306,6 +306,49 @@ def _check_changelog_gate(command: str, cwd: str, tokens: list[str]) -> None:
     )
 
 
+# === Gate de deploy: o passo público EXIGE OK (§6, §10) ===================
+def _public_remotes() -> set[str]:
+    """Remotes considerados 'públicos' (tocam usuário externo). Config por env
+    `KOBE_CODER_PUBLIC_REMOTES` (vírgula-separado). Vazio = gate inativo (sem
+    falso-positivo: projetos sem deploy público não são afetados)."""
+    raw = os.environ.get("KOBE_CODER_PUBLIC_REMOTES", "").strip()
+    return {r.strip() for r in raw.split(",") if r.strip()}
+
+
+def _push_target_remote(tokens: list[str]) -> str | None:
+    """Extrai o remote de um `git push <remote> ...` (1º positional após push)."""
+    if "push" not in tokens:
+        return None
+    try:
+        i = tokens.index("push")
+    except ValueError:
+        return None
+    for t in tokens[i + 1:]:
+        if t.startswith("-"):
+            continue
+        return t
+    return None
+
+
+def _check_deploy_gate(command: str, tokens: list[str], state: dict | None) -> None:
+    publics = _public_remotes()
+    if not publics:
+        return
+    if not (re.search(r"\bgit\b", command) and "push" in tokens):
+        return
+    remote = _push_target_remote(tokens)
+    if remote not in publics:
+        return
+    if state is not None and state.get("deploy_approved"):
+        return
+    _deny(
+        f"[guard:deploy] Push pro remote público '{remote}' bloqueado: o passo "
+        "final de deploy que toca usuário público exige OK explícito do operador "
+        "(§6/§10). Pare, mostre ao operador o que vai ser publicado, e aguarde a "
+        "aprovação. Liberado quando o operador aprovar o deploy."
+    )
+
+
 # === HALT + gate PARA-e-espera (dependem do state) ========================
 _MUTATING_TOOLS = {"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"}
 
@@ -390,6 +433,8 @@ def main() -> int:
                 _deny(f"[guard:deny-list] Comando bloqueado — {label}." + _ASK_OPERATOR)
         if _env_on("KOBE_CODER_GATE_CHANGELOG"):
             _check_changelog_gate(command, cwd, tokens)
+        if _env_on("KOBE_CODER_GATE_DEPLOY"):
+            _check_deploy_gate(command, tokens, state)
 
     # Gate PARA-e-espera-OK.
     if state is not None and _env_on("KOBE_CODER_GATE_PLAN") and not state.get("plan_approved"):
