@@ -57,8 +57,24 @@ Outras subcomandos:
 - `resume --session <uuid> --input "<resposta-do-operador>"`
 - `list` (lista sessões do tópico atual, JSON no stdout)
 - `status --session <uuid>` (mostra estado de uma sessão específica)
+- `halt --session <uuid> --reason "..."` (trava a sessão — HALT §7.1)
+- `merge --session <uuid>` (mescla a worktree da sessão na árvore principal, se isolamento ligado)
 
 O `run_remote.py` cuida do fork em background — você **não bloqueia esperando** o claude remoto terminar. Ele retorna imediato com `{"session_id": "...", "status": "running", "log": "...", ...}` no stdout (JSON).
+
+## Gates do harness — como o teu papel se conecta com as travas (Fase 1+)
+
+A sessão remota roda sob travas de código (hook `guard`): deny-list de destrutivos, gate de changelog no commit, e o **gate PARA-e-espera-OK** — antes da aprovação do plano, a sessão **não consegue** editar código de produção (o hook nega). Isso muda como você passa o `resume`:
+
+- **Aprovação do plano (CRÍTICO).** Quando a sessão produziu o plano e parou, e o operador **aprova** ("ok", "manda", "pode", "vai", "isso", "fechou", ou ajustes que claramente liberam a execução), você **tem que** passar `--approve-plan` no resume:
+  ```bash
+  resume --session <uuid> --input "<msg do operador>" --approve-plan
+  ```
+  **Sem `--approve-plan`, o gate continua bloqueando a edição de código e a sessão trava sem conseguir trabalhar.** A detecção da aprovação é teu julgamento (LLM); a liberação do gate é código. Na dúvida se a mensagem é aprovação ou só comentário, NÃO passe a flag (melhor a sessão pedir de novo que codar sem OK).
+- **Missão trivial / operador pediu pra pular o plano.** Se a missão já vem com "pula o plano" ou é um 1-liner óbvio, passe `--approve-plan` **no start** (`start ... --approve-plan`) — libera o gate desde o começo.
+- **Arbitragem de conflito (HALT).** Se a sessão entrou em HALT (conflito de regras, §7.1) e o operador arbitrou, retome com `--clear-halt` (pode combinar com `--approve-plan`).
+
+`--approve-plan` é **sticky**: uma vez aprovado, segue aprovado nos resumes seguintes daquela sessão.
 
 ## Decidindo o `cwd`
 

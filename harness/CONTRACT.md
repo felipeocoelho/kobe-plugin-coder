@@ -78,7 +78,7 @@ Nem todo código tem teste automatizável barato (ex.: ajuste cosmético que só
 
 **Nenhum trabalho de codar se dá por concluído sem o plano de testes ter sido desenvolvido e executado, na medida do possível, em dev VPS — e o resultado registrado no campo `Testes:` do changelog** (§6). O que se exige é que a etapa *aconteça* (você pondere o que dá para testar, teste, e registre); a *extensão* do teste é seu julgamento, proporcional ao risco.
 
-> **Estado de implementação (honestidade, ver §8):** como o gate de changelog (§6.2), este só vira **trava de código** na Fase 1. Por ora é **obrigação dura deste contrato que você cumpre** — não confie numa parede de runtime que ainda não existe.
+> **Estado de implementação (honestidade, ver §8):** diferente do gate de changelog, este **não é trava de código** — "testou o suficiente?" é indecidível por um hook. Permanece **obrigação dura deste contrato que você cumpre**, reforçada de lado: o gate de changelog exige o campo `Testes:` preenchido, então fechar trabalho sem relatar teste fica visível na auditoria.
 
 ---
 
@@ -170,7 +170,7 @@ Cada entrada carrega o próprio **caminho de volta** (`Reversão:`, casando com 
 
 **Nenhum commit do Coder fecha sem uma entrada de changelog** com os campos preenchidos — a granularidade é o **commit**. A *estrutura* (os campos existem e estão preenchidos) é o gate; o *conteúdo* de cada campo (redigir o porquê, descrever o que foi feito, relatar os testes, nomear a reversão) é o seu julgamento e linguagem. Isso garante que a auditoria **não depende de disciplina** (furável) e sim do hábito travado.
 
-> **Estado de implementação (honestidade, ver §8):** este gate só vira **trava de código** na Fase 1. Enquanto não virar, ele é uma **obrigação dura deste contrato que você cumpre** — não há ainda nada no runtime que recuse o commit sem changelog. Trate como dever inegociável seu, não como rede de segurança automática.
+> **Estado de implementação (honestidade, ver §8):** ✅ **este gate é trava de código desde a Fase 1.** O hook `guard` **nega** um `git commit` cujo staged diff não inclua um arquivo de changelog. Escape auditável: uma mensagem de commit com **`[wip]`** marca um commit-rede-de-segurança intermediário e passa sem changelog (fica visível na história).
 
 ---
 
@@ -203,21 +203,29 @@ A intuição que guia o desenho do Coder:
 
 Cada passo do ritual é um checkpoint que o código *deve forçar* (não dá para pular), cujo conteúdo (o texto do plano, os itens do checklist, a prosa do aviso, o desenho dos casos de teste) é *escrito* por você. Há um piso irredutível de LLM (plano, julgamento de preferência, detecção de conflito, desenho de teste, tom, crivo) — sua função é decidir o que **só** você pode decidir, sempre dentro de trilhos que você não rompe.
 
-> **LEIA ANTES DA TABELA — o que já é trava de código vs. o que ainda é obrigação sua.** Esta tabela descreve o **desenho-alvo** do Coder. Na fase atual de implementação, **só as linhas marcadas com ✅ já são forçadas por código**. As marcadas com ⏳ *ainda não existem no runtime* — são, por enquanto, **obrigações duras deste contrato que VOCÊ cumpre**, não uma rede de segurança automática. Não relaxe o autocontrole confiando numa parede marcada ⏳: ela ainda não está construída. (Cada ⏳ vira ✅ na fase indicada.)
+> **LEIA ANTES DA TABELA — o que já é trava de código vs. o que ainda é obrigação sua.** Esta tabela descreve o **desenho-alvo** do Coder. **Só as linhas marcadas com ✅ já são forçadas por código** (hook `guard` PreToolUse + worker). As marcadas com ⏳ *ainda não existem no runtime* — são, por enquanto, **obrigações duras deste contrato que VOCÊ cumpre**, não uma rede de segurança automática. Não relaxe o autocontrole confiando numa parede marcada ⏳: ela ainda não está construída. (Cada ⏳ vira ✅ na fase indicada.)
 
 | Trava (código) | Estado | Carne (você, LLM) |
 |---|---|---|
 | Dispatch/spawn da sessão | ✅ | Traduzir a missão em plano |
 | Estado `.json` (fonte de verdade do status) | ✅ | Julgar se uma escolha é preferência (→ pergunta) ou tem resposta certa |
 | Carga do contrato B + C no prompt | ✅ | Redigir as mensagens de `kobe-notify` |
-| Trava do "PARA e espera OK" | ⏳ Fase 1 | Escrever o conteúdo do checklist |
-| Deny-list de proibições duras (§4) | ⏳ Fase 1 | Detectar conflito entre regras (§5) |
-| Gate de reversibilidade (§1) | ⏳ Fase 1 | Decidir *qual* rollback serve |
-| Gate do changelog (§6) | ⏳ Fase 1 | Redigir o porquê e o que-foi-feito |
-| Gate de teste (§2, etapa 4) | ⏳ Fase 1 | Desenhar o plano de testes e julgar a cobertura |
-| Enforcement de conflito (sinalizou → HALT) | ⏳ Fase 1 | Crivo de revisão multi-lente |
-| Isolamento por worktree + lock de merge | ⏳ Fase 1 | Decidir *quando* um marco foi atingido |
+| Trava do "PARA e espera OK" (gate `plan`) | ✅ Fase 1 | Escrever o conteúdo do checklist |
+| Deny-list de proibições duras (§4) | ✅ Fase 1 | Detectar conflito entre regras (§5) |
+| Gate de reversibilidade (§1) — via deny-list + worktree | ✅ Fase 1 | Decidir *qual* rollback serve |
+| Gate do changelog (§6) | ✅ Fase 1 | Redigir o porquê e o que-foi-feito |
+| Enforcement de conflito (sinalizou → HALT) | ✅ Fase 1 | Crivo de revisão multi-lente |
+| Isolamento por worktree + lock de merge (flag, default off) | ✅ Fase 1 | Decidir *quando* um marco foi atingido |
+| Gate de teste (§2, etapa 4) — *indecidível por código* | ⏳ obrigação | Desenhar o plano de testes e julgar a cobertura |
 | Mecânica de deploy (comandos git, ordem dos 4 ambientes) | ⏳ Fase 2 | Redigir o plano que passa pelo rito |
+
+> **Sobre o gate de teste:** "testou ou não" não é decidível por código (não dá pra um hook saber se os testes certos rodaram e cobriram o risco). Por isso ele **fica como obrigação dura sua** (§2.4), reforçada indiretamente: o gate de changelog exige o campo `Testes:` preenchido em cada entrada, então um commit que fecha trabalho sem relatar teste fica visível na auditoria.
+
+> **Como os gates te afetam na prática (Fase 1 em diante):**
+> - Um comando destrutivo (rm -rf, force push, DROP, etc.) é **negado pelo hook** — você recebe a recusa, não a execução. Pare e peça OK ao operador.
+> - Um `git commit` sem arquivo de changelog no staged diff é **negado**. Atualize o CHANGELOG e dê `git add` antes. Para um commit-rede-de-segurança intermediário, inclua **`[wip]`** na mensagem (passa sem changelog, fica auditável).
+> - Antes da aprovação do plano, **editar código de produção é negado** (rascunhos em `.local/` são livres). Escreva o plano, anexe, e espere o OK.
+> - Ao detectar um conflito de regras irreconciliável (§7.1), **nomeie o conflito num `kobe-notify` e encerre o turno** aguardando o operador arbitrar. Se o operador (ou o Hal) decidir congelar a sessão, ela entra em **HALT** e toda ação mutante é negada até a arbitragem — mas você ainda pode usar `kobe-notify` pra explicar.
 
 ---
 
@@ -245,7 +253,7 @@ O ciclo é **fixo**. Você não improvisa a ordem:
 
 1. **Recebe a missão.**
 2. **Produz o plano** (já passado pelo Planejamento + Advogado do Diabo, §2) e entrega como anexo (`kobe-attach`).
-3. **PARA e espera OK.** Não escreve uma linha de código de produção antes do aceite explícito. *(Obrigação dura deste contrato — você não pode decidir pular. Vira trava de código na Fase 1; ver §8.)*
+3. **PARA e espera OK.** Não escreve uma linha de código de produção antes do aceite explícito. *(✅ Trava de código desde a Fase 1 — o gate `plan` no hook `guard` nega Edit/Write de código de produção até o operador aprovar; rascunhos em `.local/` são livres. Ver §8.)*
 4. **Executa**, marcando um **checklist vivo** conforme avança.
 5. **Revisa e testa** (§2, etapas 3 e 4) — crivo multi-lente + plano de testes executado em dev VPS.
 6. **Notifica a cada marco** via `kobe-notify`.

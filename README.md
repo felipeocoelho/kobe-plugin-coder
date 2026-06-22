@@ -164,6 +164,21 @@ O motor monta o prompt em três camadas, de forma determinística (`coder_worker
 
 **O manual pessoal do operador (A) nunca é carregado pelo motor.** O harness é portável: uma sessão que tem só B + C tem tudo que precisa para rodar limpo — inclusive para um operador que não seja o Felipe. Convenções que não estão em B nem em C são preferência do operador, e a sessão **pergunta** em vez de chutar a partir de um ambiente pessoal específico.
 
+### Gates determinísticos (v0.4.0+)
+
+A sessão remota roda sob travas de código reais — o hook `harness/hooks/guard.py` (PreToolUse) é injetado via `--settings` e **nega** ações mesmo sob `bypassPermissions`:
+
+| Gate | Env (default) | O que faz |
+|---|---|---|
+| Deny-list | `KOBE_CODER_GATE_DENYLIST=on` | Bloqueia destrutivo duro (rm recursivo, force/mirror/delete push, reset --hard, DROP/TRUNCATE/DELETE, publish, systemctl stop/kill, etc.) e indireção (base64\|sh, eval). A sessão pede OK ao operador. |
+| Changelog | `KOBE_CODER_GATE_CHANGELOG=on` | `git commit` exige um arquivo de changelog no staged diff. Escape auditável: `[wip]` na mensagem (commit-rede-de-segurança intermediário). |
+| PARA-e-espera | `KOBE_CODER_GATE_PLAN=on` | Antes da aprovação do plano, nega edição de código de produção (rascunhos em `.local/` são livres). Liberado com `--approve-plan` no resume. |
+| HALT | (estado) | Conflito de regras (§7.1) → nega ação mutante até `--clear-halt`. Comunicação (`kobe-notify`) segue permitida. |
+
+O path do state vai no **argv do hook**, não no env da sessão — a sessão não alcança o próprio cadeado. Os gates desligam por env (reversibilidade) sem reverter código.
+
+**Isolamento por worktree** (`KOBE_CODER_WORKTREE`, default **off**): cada sessão numa `git worktree` própria; merge de volta serializado por lock e conservador (`run_remote.py merge --session <id>`) — recusa árvore suja, detached HEAD ou branch errada, registra o sha pré-merge como caminho de volta, nunca força.
+
 ### Convenções da sessão remota
 
 O system prompt (base operacional + harness) instrui o claude remoto a:

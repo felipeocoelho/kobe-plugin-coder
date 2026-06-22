@@ -4,6 +4,24 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > **A partir de v0.3.0** o changelog segue o **formato auditável** do harness do Coder (§6 do `harness/CONTRACT.md`): cada mudança registra *o que o operador pediu*, *por quê*, *o que foi feito*, *o que foi testado*, *os commits* e *como reverter*. É a trilha de auditoria da codificação — auditoria, reversibilidade e teste no mesmo lugar. Entradas anteriores seguem o [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.4.0] — 2026-06-22 — Gates determinísticos + isolamento por worktree (Fase 1 do upgrade)
+
+**Operador pediu:** seguir o plano-mestre V3 implementando a Fase 1 — as travas de código (o "trilho antes do trem") — sob o rito de quatro etapas, com revisão adversarial multi-agente.
+
+**Por quê:** a Fase 0 deu à sessão as *regras do jogo* (o harness), mas elas eram só prosa que o LLM honra. A Fase 1 transforma as regras críticas em **travas de código** que a sessão autônoma (que roda sob `bypassPermissions`) não consegue pular — porque o que tem resposta certa e não pode driftar é código, não julgamento (§12 do plano).
+
+**Foi feito:**
+- **Hook `guard.py` (PreToolUse)** — enforcement real: verificado empiricamente que um hook que devolve `permissionDecision:deny` bloqueia a ferramenta **mesmo sob bypassPermissions**. Gates: **deny-list** de destrutivos (rm recursivo em qualquer forma, force/mirror/delete push, reset --hard, clean, restore/checkout ., DROP/TRUNCATE/DELETE, publish, systemctl/service/pkg, chmod -R 777, indireção base64|sh/eval/pipe-pra-interpretador); **gate de changelog** (commit exige arquivo de changelog no staged; escape `[wip]`); **gate PARA-e-espera-OK** (edição de código de produção negada até aprovação do plano; `.local/` livre); **HALT** (conflito de regras → nega ação mutante, exceto comunicação).
+- **Wiring no worker** via `--settings` gerado por sessão. O path do state vai no **argv do hook**, não no env da sessão — a sessão não conhece o path do próprio cadeado e não pode reescrever `plan_approved`/`halted` por Bash. Settings efêmero em subdir `.settings/` (não colide com a busca de sessão).
+- **Estado novo** (`run_remote.py`): `plan_approved`, `halted`, `halt_reason`, campos de worktree. Comandos: `--approve-plan` (start/resume), `--clear-halt` (resume), `halt`, `merge`. Agent def atualizado: o Hal passa `--approve-plan` ao detectar a aprovação do operador (detecção = LLM, liberação do gate = código).
+- **Isolamento por worktree + lock de merge** (`KOBE_CODER_WORKTREE`, **default OFF** por reversibilidade): cada sessão roda numa `git worktree` própria; merge de volta serializado por `flock`, conservador — registra branch+sha de origem, recusa detached HEAD / branch errada / árvore suja / worktree suja, `branch -d` (não `-D`), grava o sha pré-merge como caminho de volta (§5.1). Nunca força, nunca auto-resolve conflito.
+
+**Testes (dev VPS):** suíte de ~70 casos do guard cobrindo cada bypass que a revisão adversarial encontrou (rm flags separadas/long, redirect no carve-out, DELETE com WHERE, push mirror/delete/refspec, systemctl kill, base64|sh, etc.) + proteção do state + plan gate + HALT comm-only + fail-closed; suíte de worktree (setup/merge/cleanup/dirty-safety/non-git); **2 testes de integração com `claude -p` real** confirmando deny-list e plan-gate bloqueando sob bypassPermissions com o settings real. Todos passaram. **Revisão adversarial de 4 agentes** (bypass de deny-list, fluxo dos gates, segurança da worktree, correção do código) achou 5 blockers reais (state auto-gravável, colisão de glob do settings, merge cego, force-remove, HALT mudo) + majors — **todos corrigidos e re-testados** antes de fechar. Resíduo honesto: indireção arbitrária (travessia cega do FS pra achar o state) não é 100% pegável por regex — mitigado (vetores diretos fechados, fail-closed em corrupção), e é em si violação de contrato tratável como HALT.
+
+**Commits:** v0.4.0 (ver `git log`).
+
+**Reversão:** aditiva e flag-gated. Rollback = `git revert` do commit de v0.4.0. Os gates podem ser desligados sem reverter código via env (`KOBE_CODER_GATE_DENYLIST/CHANGELOG/PLAN=false`); a worktree já nasce desligada (`KOBE_CODER_WORKTREE` default off). Nada fora do git foi tocado.
+
 ## [0.3.0] — 2026-06-22 — Fundação do harness do Coder (Fase 0 do upgrade)
 
 **Operador pediu:** implementar o upgrade do Coder pelo plano-mestre V3 já validado, começando pela Fase 0 (fundação do harness), sob o rito de quatro etapas e com orquestração multi-agente (ultracode) autorizada.

@@ -18,6 +18,8 @@ Estado vive em $KOBE_HOME/user-data/coder-sessions/<topic-key>/<uuid>.json
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import subprocess
@@ -30,6 +32,94 @@ from typing import Optional
 # Import local — `presence.py` mora no mesmo diretório que este script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import presence  # noqa: E402
+
+
+# === Isolamento por git worktree + lock de merge (§13.1) ==================
+# Feature-flag, default OFF: cada sessão roda numa worktree própria (cópia
+# isolada, mesma origem), e os merges de volta são serializados por um lock —
+# nunca duas sessões escrevendo a árvore principal ao mesmo tempo. Default off
+# é decisão de reversibilidade: liga o isolamento sem mudar o comportamento
+# padrão até validar em uso real. `KOBE_CODER_WORKTREE=true` ativa.
+
+
+def _worktree_enabled() -> bool:
+    raw = os.environ.get("KOBE_CODER_WORKTREE", "").strip().lower()
+    return raw in ("1", "true", "on", "yes")
+
+
+def _git(args: list[str], cwd: str | Path, timeout: int = 60) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        capture_output=True, text=True, timeout=timeout,
+    )
+
+
+def _git_toplevel(cwd: Path) -> Optional[Path]:
+    try:
+        r = _git(["rev-parse", "--show-toplevel"], cwd)
+    except Exception:  # noqa: BLE001
+        return None
+    if r.returncode != 0:
+        return None
+    top = r.stdout.strip()
+    return Path(top) if top else None
+
+
+def _setup_worktree(origin_cwd: Path, short_id: str, kobe_home: Path) -> Optional[dict]:
+    """Cria uma worktree isolada para a sessão. Retorna dict com os campos pro
+    state, ou None se não for um repo git (cai no comportamento padrão).
+
+    Mecânica 100% determinística (código): cria branch `coder/<short>` a partir
+    do HEAD atual e adiciona uma worktree fora da árvore principal. Falha em
+    qualquer passo → retorna None e a sessão roda na cwd original (degrada sem
+    travar; reversibilidade > isolamento quando o isolamento não dá pra montar).
+    """
+    main_repo = _git_toplevel(origin_cwd)
+    if main_repo is None:
+        return None  # não é repo git — sem worktree
+    # Registra a branch+sha de origem ANTES de criar a worktree — é o ponto
+    # pra onde o merge deve voltar (§5.1: caminho de volta registrado antes de
+    # agir). Se o repo estiver em detached HEAD, origin_branch fica None e o
+    # merge depois recusa (não mescla cego).
+    ob = _git(["symbolic-ref", "--quiet", "--short", "HEAD"], main_repo)
+    origin_branch = ob.stdout.strip() if ob.returncode == 0 else None
+    os_ = _git(["rev-parse", "HEAD"], main_repo)
+    origin_sha = os_.stdout.strip() if os_.returncode == 0 else None
+    wt_base = kobe_home / "user-data" / "coder-worktrees"
+    wt_path = wt_base / short_id
+    branch = f"coder/{short_id}"
+    try:
+        wt_base.mkdir(parents=True, exist_ok=True)
+        r = _git(["worktree", "add", "-b", branch, str(wt_path), "HEAD"], main_repo)
+        if r.returncode != 0:
+            return None
+    except Exception:  # noqa: BLE001
+        return None
+    return {
+        "main_repo": str(main_repo),
+        "worktree_path": str(wt_path),
+        "worktree_branch": branch,
+        "origin_branch": origin_branch,
+        "origin_sha": origin_sha,
+    }
+
+
+@contextlib.contextmanager
+def _merge_lock(kobe_home: Path):
+    """Serializa merges de volta à árvore principal — um de cada vez na fila.
+    flock exclusivo num lockfile; libera ao sair do contexto (inclusive em erro).
+    """
+    lock_dir = kobe_home / "user-data" / "coder-worktrees"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_dir / ".merge.lock"
+    fh = lock_path.open("w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+    finally:
+        with contextlib.suppress(Exception):
+            fcntl.flock(fh, fcntl.LOCK_UN)
+        fh.close()
 
 
 def _kobe_home() -> Path:
@@ -104,6 +194,8 @@ def _count_active_sessions_global(kobe_home: Path) -> tuple[int, list[dict]]:
                 data = json.loads(state_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
+            if not data.get("session_id"):  # ignora .json que não seja state de sessão
+                continue
             status = data.get("status")
             if status not in ("starting", "running"):
                 continue
@@ -135,6 +227,8 @@ def _list_sessions(topic_dir: Path) -> list[dict]:
         try:
             data = json.loads(state_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            continue
+        if not data.get("session_id"):  # ignora .json que não seja state de sessão
             continue
         # Crash detection: status="running" mas PID não existe → marca crashed
         status = data.get("status")
@@ -266,11 +360,29 @@ def cmd_start(args: argparse.Namespace) -> int:
     state_path = topic_dir / f"{session_id}.json"
     log_path = topic_dir / f"{session_id}.log"
 
+    # Isolamento por worktree (§13.1), se ligado e a cwd for repo git. A sessão
+    # passa a rodar na worktree (run_cwd); origin_cwd guarda onde o operador
+    # apontou; os campos de merge ficam no state pro `merge` depois.
+    origin_cwd = cwd
+    run_cwd = cwd
+    worktree_fields: dict = {
+        "origin_cwd": str(origin_cwd),
+        "main_repo": None,
+        "worktree_path": None,
+        "worktree_branch": None,
+        "merged": False,
+    }
+    if _worktree_enabled():
+        wt = _setup_worktree(origin_cwd, short, kobe_home)
+        if wt is not None:
+            run_cwd = Path(wt["worktree_path"])
+            worktree_fields.update(wt)
+
     state = {
         "session_id": session_id,
         "short_id": short,
         "topic_key": topic_key,
-        "cwd": str(cwd),
+        "cwd": str(run_cwd),
         "mission": mission,
         "created_at": _now_iso(),
         "last_activity": _now_iso(),
@@ -283,6 +395,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         "last_text": None,
         "turn_count": 0,
         "pending_input": None,
+        # Gate PARA-e-espera-OK (§10): edição de código de produção fica
+        # bloqueada (hook guard) até o plano ser aprovado. `--approve-plan` no
+        # start pré-aprova (operador mandou missão trivial / pulou o plano).
+        "plan_approved": bool(getattr(args, "approve_plan", False)),
+        # HALT (§7.1): conflito de regras irreconciliável trava a sessão.
+        "halted": False,
+        "halt_reason": None,
+        # Isolamento por worktree (§13.1) — campos nulos quando desligado.
+        **worktree_fields,
     }
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -341,6 +462,15 @@ def cmd_resume(args: argparse.Namespace) -> int:
     state["last_activity"] = _now_iso()
     state["status"] = "starting"
     state["exit_code"] = None
+    # Aprovação do plano (§10): o operador aprovou → libera o gate PARA-e-espera.
+    # Detecção da aprovação ("ok/manda/pode") é do agente principal (LLM); a
+    # trava é código. Sticky: uma vez aprovado, segue aprovado.
+    if getattr(args, "approve_plan", False):
+        state["plan_approved"] = True
+    # Arbitragem de conflito (§7.1): operador resolveu o HALT → destrava.
+    if getattr(args, "clear_halt", False):
+        state["halted"] = False
+        state["halt_reason"] = None
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     log_path = Path(state["log_path"])
@@ -417,6 +547,141 @@ def cmd_status(args: argparse.Namespace) -> int:
     return _emit(json.loads(state_path.read_text(encoding="utf-8")))
 
 
+def cmd_merge(args: argparse.Namespace) -> int:
+    """Mescla de volta a worktree da sessão na árvore principal (§13.1).
+
+    Operação TERMINAL e conservadora — pensada pra reversibilidade:
+    - serializada por lock (nunca dois merges concorrentes);
+    - aborta se a árvore principal estiver suja (não arrisca dado não-salvo);
+    - `--no-ff` (preserva o histórico da sessão);
+    - se houver conflito, faz `merge --abort` e reporta — NUNCA auto-resolve nem
+      força. O operador (ou uma sessão) resolve o conflito à mão depois.
+    Em sucesso, remove a worktree e a branch da sessão e marca `merged`.
+    """
+    kobe_home = _kobe_home()
+    topic_key = _topic_key()
+    topic_dir = _sessions_dir(kobe_home, topic_key)
+    state_path = _resolve_session(topic_dir, args.session)
+    if state_path is None:
+        return _emit({"error": f"sessão {args.session!r} não encontrada"}, error=True)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+
+    branch = state.get("worktree_branch")
+    main_repo = state.get("main_repo")
+    if not branch or not main_repo:
+        return _emit(
+            {"error": "sessão não tem worktree (isolamento desligado ou cwd não-git) — nada a mesclar.",
+             "short_id": state.get("short_id")},
+            error=True,
+        )
+    if state.get("merged"):
+        return _emit({"ok": True, "action": "merge", "note": "já mesclada", "short_id": state.get("short_id")})
+    if state.get("status") in {"running", "starting"}:
+        return _emit({"error": "sessão ainda ativa — aguarde o turno encerrar antes de mesclar."}, error=True)
+
+    main = Path(main_repo)
+    wt_path = state.get("worktree_path")
+    origin_branch = state.get("origin_branch")
+    branch_kept = False
+    with _merge_lock(kobe_home):
+        # (a) A árvore principal NÃO pode estar em detached HEAD — senão o merge
+        # vira commit flutuante e o cleanup orfaniza tudo (B3).
+        cur = _git(["symbolic-ref", "--quiet", "--short", "HEAD"], main)
+        if cur.returncode != 0:
+            return _emit({"error": "árvore principal está em detached HEAD — faça checkout da "
+                                   "branch de destino antes de mesclar. Não mesclo cego."}, error=True)
+        current_branch = cur.stdout.strip()
+        # (b) E precisa ser a MESMA branch de onde a worktree saiu — senão
+        # mesclaríamos o trabalho na branch errada (B3).
+        if origin_branch and current_branch != origin_branch:
+            return _emit({"error": f"árvore principal está na branch '{current_branch}', mas a sessão "
+                                   f"saiu de '{origin_branch}'. Faça checkout de '{origin_branch}' antes "
+                                   "de mesclar (ou confirme a intenção). Não mesclo na branch errada."},
+                         error=True)
+        # (c) Árvore principal limpa — não pisa mudança não-salva.
+        dirty = _git(["status", "--porcelain"], main)
+        if dirty.returncode != 0:
+            return _emit({"error": f"não consegui checar a árvore principal: {dirty.stderr.strip()}"}, error=True)
+        if dirty.stdout.strip():
+            return _emit({"error": "árvore principal está suja (mudanças não-commitadas) — "
+                                   "commit/stash antes de mesclar. Não arrisco sobrescrever.",
+                          "dirty": dirty.stdout.strip()[:500]}, error=True)
+        # (d) A worktree NÃO pode ter trabalho não-commitado/untracked — o merge
+        # só leva COMMITS; remover a worktree com sujeira perderia esse trabalho (B4).
+        if wt_path and Path(wt_path).is_dir():
+            wt_dirty = _git(["status", "--porcelain"], wt_path)
+            if wt_dirty.returncode == 0 and wt_dirty.stdout.strip():
+                return _emit({"error": "a worktree da sessão tem mudanças não-commitadas/untracked — "
+                                       "commite-as (ou descarte explicitamente) antes de mesclar. O merge "
+                                       "só leva commits; não removo a worktree com trabalho solto.",
+                              "wt_dirty": wt_dirty.stdout.strip()[:500]}, error=True)
+        # (e) Caminho de volta registrado ANTES de agir (§5.1).
+        pre = _git(["rev-parse", "HEAD"], main)
+        pre_merge_sha = pre.stdout.strip() if pre.returncode == 0 else None
+
+        # Há o que mesclar?
+        ahead = _git(["rev-list", "--count", f"HEAD..{branch}"], main)
+        if ahead.returncode != 0:
+            return _emit({"error": f"não consegui comparar a branch da sessão ('{branch}') com a principal "
+                                   f"— ref inválida? abortado sem mexer. {ahead.stderr.strip()}"}, error=True)
+        if ahead.stdout.strip() == "0":
+            note = "nada a mesclar (sessão não adicionou commits)."
+        else:
+            mr = _git(["merge", "--no-ff", "-m",
+                       f"merge coder/{state.get('short_id')}: {state.get('mission','')[:80]}", branch],
+                      main, timeout=120)
+            if mr.returncode != 0:
+                _git(["merge", "--abort"], main)  # conflito → aborta, NÃO auto-resolve
+                return _emit({"error": "merge falhou/conflitou — abortado, árvore principal intacta. "
+                                       "Resolva o conflito manualmente.",
+                              "git_stderr": (mr.stderr or mr.stdout).strip()[:800],
+                              "branch": branch, "rollback_sha": pre_merge_sha}, error=True)
+            note = "mesclado com --no-ff."
+
+        # Cleanup conservador: worktree já validada limpa (d) → remove é seguro;
+        # branch -d (não -D) só remove se de fato incorporada (sem perder commit).
+        if wt_path:
+            _git(["worktree", "remove", wt_path], main)
+        bd = _git(["branch", "-d", branch], main)
+        branch_kept = bd.returncode != 0  # -d recusou → tem commit não incorporado; preserva
+
+    state["merged"] = True
+    state["status"] = "merged"
+    state["merged_into"] = origin_branch or current_branch
+    state["pre_merge_sha"] = pre_merge_sha
+    state["last_activity"] = _now_iso()
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    if note.startswith("mesclado"):
+        note += f" Caminho de volta: `git -C {main} reset --hard {pre_merge_sha}` (ou revert do merge)."
+    if branch_kept:
+        note += f" (branch '{branch}' preservada — `git branch -d` recusou; pode ter commit não incorporado.)"
+    return _emit({"ok": True, "action": "merge", "short_id": state.get("short_id"),
+                  "branch": branch, "note": note})
+
+
+def cmd_halt(args: argparse.Namespace) -> int:
+    """Marca uma sessão como HALTED (§7.1) — o hook guard passa a negar toda
+    ação mutante até o operador arbitrar (`resume --clear-halt`). Pode ser
+    acionado pelo operador ou pela própria sessão (via helper) ao detectar um
+    conflito de regras irreconciliável.
+    """
+    kobe_home = _kobe_home()
+    topic_key = _topic_key()
+    topic_dir = _sessions_dir(kobe_home, topic_key)
+    state_path = _resolve_session(topic_dir, args.session)
+    if state_path is None:
+        return _emit({"error": f"sessão {args.session!r} não encontrada"}, error=True)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["halted"] = True
+    state["halt_reason"] = (args.reason or "").strip() or "parada dura sinalizada"
+    state["last_activity"] = _now_iso()
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    return _emit(
+        {"ok": True, "action": "halt", "short_id": state.get("short_id"),
+         "halt_reason": state["halt_reason"]}
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="CLI do plugin coder do Kobe — sessões remotas de Claude Code"
@@ -431,11 +696,31 @@ def main() -> int:
         action="store_true",
         help="pula aviso de pasta ocupada (use quando o operador confirmou).",
     )
+    s.add_argument(
+        "--approve-plan",
+        dest="approve_plan",
+        action="store_true",
+        help="pré-aprova o plano (missão trivial / operador pediu pra pular o "
+        "plano) — libera o gate PARA-e-espera desde o start.",
+    )
     s.set_defaults(func=cmd_start)
 
     r = sub.add_parser("resume", help="retoma sessão existente com novo input")
     r.add_argument("--session", required=True, help="uuid ou short-id da sessão")
     r.add_argument("--input", required=True, help="texto da nova mensagem do operador")
+    r.add_argument(
+        "--approve-plan",
+        dest="approve_plan",
+        action="store_true",
+        help="o operador aprovou o plano nesta retomada — libera o gate de "
+        "edição de código de produção (sticky).",
+    )
+    r.add_argument(
+        "--clear-halt",
+        dest="clear_halt",
+        action="store_true",
+        help="o operador arbitrou o conflito — destrava a sessão (limpa HALT).",
+    )
     r.set_defaults(func=cmd_resume)
 
     l = sub.add_parser("list", help="lista sessões do tópico atual")
@@ -451,6 +736,15 @@ def main() -> int:
     st = sub.add_parser("status", help="detalhe de uma sessão")
     st.add_argument("--session", required=True)
     st.set_defaults(func=cmd_status)
+
+    h = sub.add_parser("halt", help="trava uma sessão (HALT §7.1) até arbitragem")
+    h.add_argument("--session", required=True, help="uuid ou short-id da sessão")
+    h.add_argument("--reason", default="", help="motivo do HALT (conflito de regras, etc.)")
+    h.set_defaults(func=cmd_halt)
+
+    m = sub.add_parser("merge", help="mescla a worktree da sessão na árvore principal (§13.1)")
+    m.add_argument("--session", required=True, help="uuid ou short-id da sessão")
+    m.set_defaults(func=cmd_merge)
 
     args = parser.parse_args()
     return args.func(args)

@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -263,6 +264,56 @@ def _build_prompt(state: dict, mode: str) -> str:
     return state.get("pending_input") or "(operador não passou conteúdo na retomada — continue de onde parou)"
 
 
+def _build_session_settings(
+    plugin_root: Path, kobe_home: Path, state_path: Path
+) -> Path | None:
+    """Escreve o settings.json da sessão que liga o hook `guard` (PreToolUse).
+
+    O guard é o enforcement de código dos gates do contrato (deny-list, gate de
+    changelog, PARA-e-espera-OK, HALT). Verificado empiricamente: um hook
+    PreToolUse que devolve `permissionDecision: deny` barra a ferramenta MESMO
+    sob `bypassPermissions` — é a única forma de travar a sessão autônoma antes
+    da ação, não depois.
+
+    Retorna o path do settings, ou None se o guard não existir na instalação —
+    nesse caso a sessão roda SEM gates (degrada em vez de quebrar; o operador é
+    avisado pelo prompt de que está sem rede). Fail-open consciente: um gate que
+    quebra a sessão por bug de instalação seria pior que a ausência do gate.
+    """
+    guard = plugin_root / "harness" / "hooks" / "guard.py"
+    if not guard.is_file():
+        return None
+    venv_python = kobe_home / ".venv" / "bin" / "python"
+    python = str(venv_python) if venv_python.is_file() else "python3"
+    # O path do state vai como ARGV do hook (controlado pelo worker), NÃO no env
+    # da sessão — assim a sessão não conhece o path do próprio cadeado e não
+    # pode reescrever plan_approved/halted via Bash (B1 da revisão).
+    hook_cmd = (
+        f"{shlex.quote(python)} {shlex.quote(str(guard))} "
+        f"--state {shlex.quote(str(state_path))}"
+    )
+    settings = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+                    "hooks": [{"type": "command", "command": hook_cmd}],
+                }
+            ]
+        }
+    }
+    # Fora do diretório de estado e da extensão `*.json` — senão o settings
+    # colidiria com o glob `<short_id>*.json` de _resolve_session e quebraria
+    # resume/status/halt/merge por short-id (B2 da revisão). Subdir `.settings/`.
+    settings_dir = state_path.parent / ".settings"
+    settings_dir.mkdir(parents=True, exist_ok=True)
+    settings_path = settings_dir / f"{state_path.stem}.json"
+    settings_path.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return settings_path
+
+
 def run_claude(
     *,
     state_path: Path,
@@ -316,11 +367,24 @@ def run_claude(
     else:
         raise ValueError(f"modo inválido: {mode}")
 
+    # Liga o hook `guard` (gates determinísticos) via --settings. Se o guard
+    # não existir, settings_path é None e a sessão roda sem gates (degrada).
+    settings_path = _build_session_settings(plugin_root, kobe_home, state_path)
+    if settings_path is not None:
+        cmd += ["--settings", str(settings_path)]
+
     prompt = _build_prompt(state, mode)
 
     cwd.mkdir(parents=True, exist_ok=True)
 
     _patch_state(state_path, status="running", started_turn_at=_now_iso())
+
+    # Env da sessão = o que o worker já tem (KOBE_HOME, token, etc.). NÃO
+    # injetamos o path do state aqui: o hook recebe o path via argv (no
+    # settings), fora do alcance da sessão. Assim a sessão não pode descobrir e
+    # reescrever o próprio cadeado (plan_approved/halted) por Bash.
+    session_env = os.environ.copy()
+    session_env.pop("KOBE_CODER_STATE_FILE", None)
 
     # Abre log em modo append. stderr → stdout pra um único stream.
     log_fh = log_path.open("a", encoding="utf-8")
@@ -335,6 +399,7 @@ def run_claude(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=False,
+            env=session_env,
         )
     except FileNotFoundError:
         _patch_state(
@@ -458,6 +523,13 @@ def run_claude(
     exit_code = proc.returncode
     log_fh.write(f"# --- turn end @ {_now_iso()} exit={exit_code} ---\n")
     log_fh.close()
+
+    # Settings é efêmero (regenerado a cada turno) — limpa pra não acumular.
+    if settings_path is not None:
+        try:
+            settings_path.unlink()
+        except OSError:
+            pass
 
     # Resultado final consolidado
     if last_text is None and assistant_texts:
