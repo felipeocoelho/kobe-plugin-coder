@@ -169,6 +169,16 @@ def _spawn_worker(state_path: Path, mode: str, log_path: Path) -> int:
     log_fh.write(f"\n# --- worker spawn @ {_now_iso()} mode={mode} ---\n")
     log_fh.flush()
 
+    # Força UTF-8 no worker. O worker monta o system prompt (~28KB, com §,
+    # emojis, acentos) e o passa como argv pro `claude`. A codificação do argv
+    # usa a filesystem encoding do worker; num locale POSIX/C puro ela cai pra
+    # ASCII e o spawn levantaria UnicodeEncodeError. PYTHONUTF8=1 é lido no
+    # startup do interpretador, então setar aqui (antes de lançar o worker)
+    # garante UTF-8 independente do locale do host — fecha o único ponto onde
+    # o conteúdo não-ASCII do harness cruza uma fronteira sensível a locale.
+    worker_env = os.environ.copy()
+    worker_env["PYTHONUTF8"] = "1"
+
     proc = subprocess.Popen(
         [
             python,
@@ -180,7 +190,7 @@ def _spawn_worker(state_path: Path, mode: str, log_path: Path) -> int:
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         start_new_session=True,  # detach do parent — não morre ao sair daqui
-        env=os.environ.copy(),
+        env=worker_env,
     )
     return proc.pid
 

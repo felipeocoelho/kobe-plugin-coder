@@ -155,12 +155,107 @@ def _notify_error(kobe_home: Path, msg: str) -> None:
         logger.exception("falha enviando kobe-notify de erro")
 
 
-def _build_prompt(state: dict, mode: str, system_prompt: str) -> str:
+def _build_system_prompt(plugin_root: Path, cwd: Path) -> str:
+    """Monta o system prompt apenso (`--append-system-prompt`) da sessão remota.
+
+    Carga determinística (código, não confiança no LLM) das camadas de regra:
+
+      1. `prompts/remote-system.md` — base operacional do runtime da sessão
+         (protocolo de comunicação, fim de turno, regras destrutivas).
+      2. `harness/CONTRACT.md` — o **harness do Coder (B)**: as regras do jogo,
+         portáveis e autocontidas. É a peça que NÃO vem da cwd, então tem que
+         ser injetada aqui — sem isso a sessão não conhece o contrato.
+
+    O **contrato do projeto (C)** é o `CLAUDE.md` da cwd, carregado nativamente
+    pelo Claude Code por a sessão rodar no diretório do projeto. Não inlinamos C
+    (evita duplicar o que o Claude Code já carrega e estourar o prompt); em vez
+    disso, anexamos uma **nota determinística** sobre a presença/ausência de C,
+    pra sessão saber o status sem adivinhar.
+
+    O **manual pessoal do operador (A)** NUNCA é carregado aqui — o harness é
+    portável e não pode depender do ambiente de um operador específico.
+    """
+    parts: list[str] = []
+
+    remote_system_file = plugin_root / "prompts" / "remote-system.md"
+    if remote_system_file.is_file():
+        parts.append(remote_system_file.read_text(encoding="utf-8"))
+    else:
+        # Base operacional ausente é instalação quebrada. Em vez de crashar o
+        # turno com erro genérico (a base é a peça mais crítica — carrega o
+        # protocolo de kobe-notify), degradamos como no caso do harness: um
+        # base mínimo inline garante que a sessão ainda saiba se comunicar e
+        # saiba que está num estado degradado. Espelha o tratamento gracioso
+        # do CONTRACT.md ausente abaixo (sem assimetria entre as duas peças).
+        parts.append(
+            "Você é uma **sessão remota de Claude Code** disparada pelo plugin "
+            "`coder`, rodando em background (sem TTY). O operador fala com você "
+            "pelo Telegram.\n\n"
+            "⚠️ INSTALAÇÃO DEGRADADA: o arquivo de base operacional "
+            f"`prompts/remote-system.md` não foi encontrado em `{plugin_root}`. "
+            "Você está operando com um base mínimo de emergência.\n\n"
+            "Regras essenciais de comunicação:\n"
+            "- Use `$KOBE_HOME/bot/bin/kobe-notify \"<texto>\"` pra falar com o "
+            "operador e `$KOBE_HOME/bot/bin/kobe-attach <path>` pra anexos.\n"
+            "- Cada `claude -p` é UM turno: termine o turno (saia) quando "
+            "concluir ou precisar de input — não tente loop interativo.\n"
+            "- Não rode ações destrutivas (`rm -rf`, force push, `DROP`, etc.) "
+            "sem confirmar com o operador via `kobe-notify`.\n"
+            "- Avise o operador, no primeiro `kobe-notify`, que a instalação do "
+            "Coder está degradada (base operacional ausente)."
+        )
+
+    contract_file = plugin_root / "harness" / "CONTRACT.md"
+    if contract_file.is_file():
+        parts.append(
+            "\n\n---\n\n# === HARNESS DO CODER (B) — regras do jogo ===\n\n"
+            + contract_file.read_text(encoding="utf-8")
+        )
+    else:
+        # Harness ausente é estado anômalo (instalação quebrada). A sessão
+        # ainda roda sob a base operacional, mas avisamos no prompt pra não
+        # operar achando que tem o contrato completo quando não tem.
+        parts.append(
+            "\n\n---\n\n# === HARNESS DO CODER (B) — AUSENTE ===\n\n"
+            "⚠️ O arquivo `harness/CONTRACT.md` não foi encontrado na instalação "
+            "do Coder. Você está operando só sob a base operacional. Trate toda "
+            "ação irreversível com cautela redobrada e, na dúvida, pergunte ao "
+            "operador via `kobe-notify`."
+        )
+
+    # Nota determinística sobre o contrato do projeto (C). `is_file()` em cwd
+    # potencialmente-inexistente (projeto novo, pasta ainda não criada) retorna
+    # False sem levantar — cai graciosamente na nota "sem contrato", que é o
+    # comportamento certo (projeto novo não tem CLAUDE.md mesmo). Por isso este
+    # bloco não exige que o `cwd.mkdir` (lá no run_claude) já tenha rodado.
+    project_contract = cwd / "CLAUDE.md"
+    if project_contract.is_file():
+        c_note = (
+            f"O contrato deste projeto (C) é `{project_contract}` — já carregado "
+            "automaticamente por você estar nesta cwd. Leia-o e some as regras "
+            "dele ao harness (modelo aditivo, §5 do contrato)."
+        )
+    else:
+        c_note = (
+            f"Não há `CLAUDE.md` em `{cwd}` — este projeto não tem contrato "
+            "próprio (C). Você opera só sob o harness do Coder (B). Convenções "
+            "específicas que faltarem são preferência do operador: pergunte, "
+            "não chute."
+        )
+    parts.append(
+        "\n\n---\n\n# === CONTRATO DO PROJETO (C) ===\n\n" + c_note
+    )
+
+    return "".join(parts)
+
+
+def _build_prompt(state: dict, mode: str) -> str:
     """Monta o prompt que vai pra stdin do claude.
 
-    Em `start`, o prompt é a missão original + o system prompt como
-    cabeçalho (porque o `--append-system-prompt` cobre isso). Em `resume`,
-    é só a nova entrada do operador.
+    O system prompt (base operacional + harness) vai EXCLUSIVAMENTE via
+    `--append-system-prompt` (ver `_build_system_prompt`); o stdin carrega só
+    a carga de trabalho: a missão (start) ou a nova entrada do operador
+    (resume). Não há injeção dupla do system prompt.
     """
     if mode == "start":
         return state["mission"]
@@ -184,9 +279,11 @@ def run_claude(
     log_path = Path(state["log_path"])
 
     # Append-system-prompt vai como string — leitura tem que estar pronta
-    # antes do popen porque ARG_MAX comporta sem stress.
-    system_prompt_file = Path(__file__).resolve().parent.parent / "prompts" / "remote-system.md"
-    system_prompt = system_prompt_file.read_text(encoding="utf-8")
+    # antes do popen porque ARG_MAX comporta sem stress. Monta as camadas de
+    # regra de forma determinística: base operacional + harness do Coder (B) +
+    # nota sobre o contrato do projeto (C). Nunca o manual pessoal (A).
+    plugin_root = Path(__file__).resolve().parent.parent
+    system_prompt = _build_system_prompt(plugin_root, cwd)
 
     if mode == "start":
         cmd = [
@@ -219,7 +316,7 @@ def run_claude(
     else:
         raise ValueError(f"modo inválido: {mode}")
 
-    prompt = _build_prompt(state, mode, system_prompt)
+    prompt = _build_prompt(state, mode)
 
     cwd.mkdir(parents=True, exist_ok=True)
 

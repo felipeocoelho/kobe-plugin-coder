@@ -152,16 +152,28 @@ Pra o claude local do operador também aparecer no `/coder_status`, adicione no 
 
 Ajuste o `KOBE_HOME` e o path do plugin conforme sua instalação. Hook é opcional — sem ele, o claude local não aparece no status (o resto do plugin continua funcionando normalmente).
 
-## Convenções da sessão remota
+## Harness do Coder — as regras do jogo (v0.3.0+)
 
-O system prompt em `prompts/remote-system.md` instrui o claude remoto a:
+A partir de v0.3.0 o Coder carrega um **harness próprio, portável e autocontido** — `harness/CONTRACT.md` — no system prompt de toda sessão remota. É o "Contrato do Coder": reversibilidade absoluta, o rito de quatro etapas (Planejamento → Advogado do Diabo → Revisão → Testes), guardrails de autonomia, modelo aditivo de regras, changelog auditável, e o contrato de deploy (4 ambientes via git). Junto vão os **baselines de qualidade** (`harness/baselines/`), cópia self-contained usada como lentes do crivo de revisão.
+
+O motor monta o prompt em três camadas, de forma determinística (`coder_worker.py::_build_system_prompt`):
+
+1. **Base operacional** (`prompts/remote-system.md`) — protocolo de comunicação com o Telegram, fim de turno, regras destrutivas.
+2. **Harness do Coder (B)** (`harness/CONTRACT.md`) — as regras do jogo, injetadas porque NÃO vêm da cwd.
+3. **Contrato do projeto (C)** — o `CLAUDE.md` do projeto-alvo, carregado nativamente pelo Claude Code por a sessão rodar na cwd do projeto. O motor anexa uma nota determinística sobre a presença/ausência de C.
+
+**O manual pessoal do operador (A) nunca é carregado pelo motor.** O harness é portável: uma sessão que tem só B + C tem tudo que precisa para rodar limpo — inclusive para um operador que não seja o Felipe. Convenções que não estão em B nem em C são preferência do operador, e a sessão **pergunta** em vez de chutar a partir de um ambiente pessoal específico.
+
+### Convenções da sessão remota
+
+O system prompt (base operacional + harness) instrui o claude remoto a:
 
 - Trabalhar autônomo (sem perguntas interativas — `input()` não funciona).
 - Sempre mandar `kobe-notify` antes de encerrar o turno (com prefixo 🟢, 🟡, ✅, 🔴, ℹ️).
-- Honrar o CLAUDE.md global do operador (se existir em `~/.claude/CLAUDE.md`).
+- Operar sob harness (B) + contrato do projeto (C); ler o `CLAUDE.md` do projeto quando incerto sobre convenção.
 - Não tentar `claude` recursivo, não rodar destrutivos sem confirmar.
 
-O system prompt é agnóstico — não menciona um operador específico. A identidade do operador é carregada pelo próprio Claude Code via `CLAUDE.md` global + `user-data/identity/USER.md` do Kobe (mesmo lugar que o agente principal lê).
+O system prompt é agnóstico — não menciona um operador específico.
 
 ## Mensagens "no meio" do desenvolvimento
 
@@ -172,7 +184,7 @@ Não há detecção automática "tem sessão ativa → repassa". Em ambiguidade,
 ## Limites
 
 - Cada turno é single-thread: o operador não interrompe um turno em andamento. A próxima msg vira input pro próximo turno.
-- `--append-system-prompt` é passado via argv. Se o prompt do `prompts/remote-system.md` crescer demais (>~500KB), pode estourar ARG_MAX. Hoje tem ~3KB.
+- `--append-system-prompt` é passado via argv. O prompt montado (base operacional + harness `CONTRACT.md`) tem ~28KB — folgadíssimo dentro do ARG_MAX (limite prático ~500KB). O contrato do projeto (C) não é inlinado (o Claude Code já o carrega pela cwd), então não pesa aqui.
 - Worker não escreve em `user-data/coder-sessions/` fora do `state.json` e do `.log` — não pode "consumir" sessões (arquivar é manual ou via comando futuro).
 
 ## Instalação
