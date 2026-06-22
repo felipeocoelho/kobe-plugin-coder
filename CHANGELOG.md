@@ -4,6 +4,23 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > **A partir de v0.3.0** o changelog segue o **formato auditável** do harness do Coder (§6 do `harness/CONTRACT.md`): cada mudança registra *o que o operador pediu*, *por quê*, *o que foi feito*, *o que foi testado*, *os commits* e *como reverter*. É a trilha de auditoria da codificação — auditoria, reversibilidade e teste no mesmo lugar. Entradas anteriores seguem o [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.1] — 2026-06-22 — Fix: esforço máximo agora chega ao boot do `claude -p`
+
+**Operador pediu:** avaliar se o `--effort-max` do plugin, que hoje só troca o PROMPT (manda rodar o crivo em agentes separados), mas NÃO passa `--effort max` (nem override de modelo) pro `claude -p` disparado, é decisão de design ou furo — e, se furo, fechá-lo na mesma trilha estruturada, mantendo a trava anti-gatilho-fantasma.
+
+**Por quê (veredito: FURO):** o Procedimento 2 do plano é "o **maior esforço disponível**". Orquestração (largura: perspectivas independentes) e esforço de raciocínio (profundidade: quão fundo cada processo pensa) são **ortogonais, não redundantes** — um orquestrador em esforço padrão ainda planeja, julga o que delegar e sintetiza o crivo em profundidade padrão, deixando o raciocínio de maior alavancagem no default. O CLI expõe o lever (`--effort max`, valores low/medium/high/xhigh/max — verificado que funciona headless), e o plano §14 já trata a escolha de modelo/esforço como parte do P2. Não usar o lever entregava só metade do "esforço máximo" que o operador pagou conscientemente.
+
+**Foi feito:**
+- `coder_worker.py::_effort_flags` — quando `state.effort == "max"`, o `claude -p` (start E resume) nasce com `--effort max`. Override de modelo **só** se `KOBE_CODER_EFFORT_MAX_MODEL` estiver setado (default OFF — a escolha Fable/Max é decisão parqueada do operador, §14); por padrão sobe só o esforço, sem trocar o modelo.
+- Prompt do Procedimento 2 enriquecido: anuncia que o processo nasceu em `--effort max` e manda rodar os agentes de crivo **também em esforço elevado** (profundidade tanto na orquestração quanto em cada lente).
+- **Trava anti-gatilho-fantasma intacta:** `effort=max` só é setado via `--effort-max`, que o Hal só passa por comando inequívoco (mencionar/perguntar "ultracode" não aciona). O `state.effort` vive no state protegido — a sessão não auto-escala.
+
+**Testes (dev VPS):** `_effort_flags` (standard→sem flag; max→`--effort max`; model só com env); cmd montado inclui/omite o flag certo (start e resume pelo mesmo caminho); prompt P2 anuncia boot em max + crivo elevado; **integração real**: `claude -p --effort max` + `--settings` do guard coexistindo — sessão sobe em max esforço E a deny-list segue bloqueando (`git reset --hard` negado). Regressão completa (guard ~70 casos + worktree) verde.
+
+**Commits:** v0.6.1 (ver `git log`). **Commit local — NÃO publicado** (repo dev/prod e restart aguardam OK explícito do operador, em passo único).
+
+**Reversão:** aditiva e mínima. Rollback = `git revert` do commit de v0.6.1. Sem `--effort-max`, nada muda (Procedimento 1, comportamento já existente).
+
 ## [0.6.0] — 2026-06-22 — Filosofia formalizada + esforço máximo sob comando (Fases 3 e 4)
 
 **Operador pediu:** implementar as Fases 3 (rito de quatro etapas formalizado) e 4 (modo esforço máximo / Procedimento 2) do plano-mestre V3.

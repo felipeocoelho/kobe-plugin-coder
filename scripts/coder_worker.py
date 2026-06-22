@@ -251,11 +251,15 @@ def _build_system_prompt(plugin_root: Path, cwd: Path, effort: str = "standard")
     if effort == "max":
         proc_note = (
             "**Procedimento 2 — ESFORÇO MÁXIMO.** O operador pediu esforço máximo "
-            "explicitamente. Rode o rito de quatro etapas com o crivo em **agentes "
+            "explicitamente, e este processo já nasceu em `--effort max` (raciocínio "
+            "no máximo). Rode o rito de quatro etapas com o crivo em **agentes "
             "separados** (§3.3, §4): use a ferramenta de subagente/Task pra rodar o "
             "Advogado do Diabo, a Revisão multi-lente (baselines como lentes) e os "
             "Testes em cabeças independentes da que planejou — pra matar o viés de "
-            "autoconfirmação. Vale o custo extra de token: o operador assumiu."
+            "autoconfirmação. **Rode esses agentes de crivo em esforço elevado "
+            "também** (ex.: effort alto/máximo), pra a profundidade chegar tanto na "
+            "orquestração quanto em cada lente. Vale o custo extra de token: o "
+            "operador assumiu."
         )
     else:
         proc_note = (
@@ -283,6 +287,27 @@ def _build_prompt(state: dict, mode: str) -> str:
         return state["mission"]
     # resume
     return state.get("pending_input") or "(operador não passou conteúdo na retomada — continue de onde parou)"
+
+
+def _effort_flags(effort: str) -> list[str]:
+    """Flags de boot do `claude -p` pro nível de esforço da sessão (§3/§4).
+
+    Procedimento 2 (esforço máximo) não é só prompt — o processo `claude`
+    orquestrador tem que NASCER em esforço máximo (`--effort max`), porque a
+    profundidade de raciocínio dele (planejar, julgar o que delegar, sintetizar
+    o crivo dos agentes) é ortogonal à orquestração em subagentes, não redundante
+    com ela. Modelo: override só se o operador configurou
+    `KOBE_CODER_EFFORT_MAX_MODEL` — por padrão NÃO troca o modelo (a escolha
+    Fable/Max é decisão parqueada do operador, §14 do plano); apenas sobe o
+    esforço. Procedimento 1 (default) não passa flag — usa o default do CLI.
+    """
+    flags: list[str] = []
+    if effort == "max":
+        flags += ["--effort", "max"]
+        model = os.environ.get("KOBE_CODER_EFFORT_MAX_MODEL", "").strip()
+        if model:
+            flags += ["--model", model]
+    return flags
 
 
 def _build_session_settings(
@@ -387,6 +412,11 @@ def run_claude(
         ]
     else:
         raise ValueError(f"modo inválido: {mode}")
+
+    # Esforço de boot do processo (§3/§4): no Procedimento 2, o orquestrador
+    # nasce em `--effort max` (+ override de modelo se configurado). Vale pra
+    # start e resume — cada turno reconstrói o cmd lendo o state.effort.
+    cmd += _effort_flags(state.get("effort", "standard"))
 
     # Liga o hook `guard` (gates determinísticos) via --settings. Se o guard
     # não existir, settings_path é None e a sessão roda sem gates (degrada).
