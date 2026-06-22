@@ -156,7 +156,7 @@ def _notify_error(kobe_home: Path, msg: str) -> None:
         logger.exception("falha enviando kobe-notify de erro")
 
 
-def _build_system_prompt(plugin_root: Path, cwd: Path) -> str:
+def _build_system_prompt(plugin_root: Path, cwd: Path, effort: str = "standard") -> str:
     """Monta o system prompt apenso (`--append-system-prompt`) da sessão remota.
 
     Carga determinística (código, não confiança no LLM) das camadas de regra:
@@ -247,6 +247,27 @@ def _build_system_prompt(plugin_root: Path, cwd: Path) -> str:
         "\n\n---\n\n# === CONTRATO DO PROJETO (C) ===\n\n" + c_note
     )
 
+    # Procedimento de esforço desta sessão (§3/§4 do contrato).
+    if effort == "max":
+        proc_note = (
+            "**Procedimento 2 — ESFORÇO MÁXIMO.** O operador pediu esforço máximo "
+            "explicitamente. Rode o rito de quatro etapas com o crivo em **agentes "
+            "separados** (§3.3, §4): use a ferramenta de subagente/Task pra rodar o "
+            "Advogado do Diabo, a Revisão multi-lente (baselines como lentes) e os "
+            "Testes em cabeças independentes da que planejou — pra matar o viés de "
+            "autoconfirmação. Vale o custo extra de token: o operador assumiu."
+        )
+    else:
+        proc_note = (
+            "**Procedimento 1 — turno padrão (default).** Rode o rito de quatro "
+            "etapas (Planejamento → Advogado do Diabo → Revisão → Testes) **inline**, "
+            "no mesmo turno (§3.3). NÃO escale pro esforço máximo por conta própria — "
+            "só o operador comanda isso (§4)."
+        )
+    parts.append(
+        "\n\n---\n\n# === PROCEDIMENTO DESTA SESSÃO ===\n\n" + proc_note
+    )
+
     return "".join(parts)
 
 
@@ -334,7 +355,7 @@ def run_claude(
     # regra de forma determinística: base operacional + harness do Coder (B) +
     # nota sobre o contrato do projeto (C). Nunca o manual pessoal (A).
     plugin_root = Path(__file__).resolve().parent.parent
-    system_prompt = _build_system_prompt(plugin_root, cwd)
+    system_prompt = _build_system_prompt(plugin_root, cwd, state.get("effort", "standard"))
 
     if mode == "start":
         cmd = [

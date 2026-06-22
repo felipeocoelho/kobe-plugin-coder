@@ -4,6 +4,24 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > **A partir de v0.3.0** o changelog segue o **formato auditável** do harness do Coder (§6 do `harness/CONTRACT.md`): cada mudança registra *o que o operador pediu*, *por quê*, *o que foi feito*, *o que foi testado*, *os commits* e *como reverter*. É a trilha de auditoria da codificação — auditoria, reversibilidade e teste no mesmo lugar. Entradas anteriores seguem o [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.6.0] — 2026-06-22 — Filosofia formalizada + esforço máximo sob comando (Fases 3 e 4)
+
+**Operador pediu:** implementar as Fases 3 (rito de quatro etapas formalizado) e 4 (modo esforço máximo / Procedimento 2) do plano-mestre V3.
+
+**Por quê:** fechar o upgrade — o Coder passa a se auto-auditar (advogado do diabo + revisão + testes) antes de entregar, e a reconhecer o comando de esforço máximo do operador, subindo pro Procedimento 2 (crivo em agentes separados) só quando pedido.
+
+**Foi feito:**
+- **Rito de quatro etapas, por procedimento, injetado no prompt** (`coder_worker.py`): a sessão recebe uma seção "PROCEDIMENTO DESTA SESSÃO" que diz se está no **Procedimento 1** (default — rito inline, "não escale por conta própria") ou no **Procedimento 2** (esforço máximo — rodar Advogado do Diabo / Revisão multi-lente / Testes em **agentes separados**, via a ferramenta de subagente, pra matar o viés de autoconfirmação).
+- **Caminho de comando pro esforço máximo** (§4): flag `--effort-max` no `start`/`resume` → estado `effort: "max"` (default `"standard"`). Nunca por auto-escalação — o estado fica no state protegido, fora do alcance da sessão.
+- **Reconhecimento no Hal** (`coder.md`): o agente passa `--effort-max` só quando o operador pede de forma **inequívoca**, com a trava anti-gatilho-fantasma (§4.2: mencionar/perguntar/projetar "ultracode" ≠ comando; na dúvida, Procedimento 1).
+- O conteúdo conceitual do rito e dos dois procedimentos já estava no `CONTRACT.md` (§2-§4) desde a Fase 0 — estas fases **operacionalizam** por sessão (a nota de procedimento + o reconhecimento do comando).
+
+**Testes (dev VPS):** assembly do prompt para `standard` e `max` (P1 traz "não escale", P2 traz "agentes separados"); retrocompat (sessão sem `effort` → standard); regressão completa do guard. Todos passaram. Self-review: a sessão self-escalar é impossível (effort vem do dispatch, state protegido); o conteúdo do rito é LLM por design (§12).
+
+**Commits:** v0.6.0 (ver `git log`).
+
+**Reversão:** aditiva. Rollback = `git revert` do commit de v0.6.0. Sem flag, tudo roda no Procedimento 1 (comportamento já existente).
+
 ## [0.5.0] — 2026-06-22 — Ritual de execução + gate do deploy público (Fase 2 do upgrade)
 
 **Operador pediu:** seguir o plano-mestre V3 implementando a Fase 2 — o ritual de execução e reporte que faz o Coder "voltar a ser usável" (MVP) — sob o rito de quatro etapas.

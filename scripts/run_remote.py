@@ -405,6 +405,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Gate de deploy (§10): push pro remote público exige OK. Liberado por
         # --approve-deploy (operador aprovou o passo final que toca o público).
         "deploy_approved": False,
+        # Nível de esforço (§3/§4): "standard" (Procedimento 1, default) ou
+        # "max" (Procedimento 2, crivo em agentes separados). Só vira "max" por
+        # comando explícito do operador — nunca por auto-escalação.
+        "effort": "max" if getattr(args, "effort_max", False) else "standard",
         # Isolamento por worktree (§13.1) — campos nulos quando desligado.
         **worktree_fields,
     }
@@ -477,6 +481,9 @@ def cmd_resume(args: argparse.Namespace) -> int:
     if getattr(args, "clear_halt", False):
         state["halted"] = False
         state["halt_reason"] = None
+    # Esforço máximo pedido no meio da sessão (§4): só sobe por comando explícito.
+    if getattr(args, "effort_max", False):
+        state["effort"] = "max"
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
     log_path = Path(state["log_path"])
@@ -709,6 +716,13 @@ def main() -> int:
         help="pré-aprova o plano (missão trivial / operador pediu pra pular o "
         "plano) — libera o gate PARA-e-espera desde o start.",
     )
+    s.add_argument(
+        "--effort-max",
+        dest="effort_max",
+        action="store_true",
+        help="Procedimento 2 (§4): esforço máximo, crivo em agentes separados. "
+        "Só quando o operador pediu explicitamente (esforço máximo/ultracode).",
+    )
     s.set_defaults(func=cmd_start)
 
     r = sub.add_parser("resume", help="retoma sessão existente com novo input")
@@ -733,6 +747,13 @@ def main() -> int:
         action="store_true",
         help="o operador aprovou o passo final de deploy (push pro remote "
         "público) — libera o gate de deploy.",
+    )
+    r.add_argument(
+        "--effort-max",
+        dest="effort_max",
+        action="store_true",
+        help="sobe a sessão pro Procedimento 2 (esforço máximo) a partir desta "
+        "retomada — só por pedido explícito do operador.",
     )
     r.set_defaults(func=cmd_resume)
 

@@ -77,6 +77,12 @@ A sessão remota roda sob travas de código (hook `guard`): deny-list de destrut
 
 `--approve-plan` é **sticky**: uma vez aprovado, segue aprovado nos resumes seguintes daquela sessão.
 
+### Esforço máximo (Procedimento 2) — só por comando explícito
+
+O default é o **Procedimento 1** (turno padrão, rito de quatro etapas inline). O **Procedimento 2** (esforço máximo: crivo em agentes separados, mais caro) só roda quando o operador **pede de forma inequívoca** ("usa esforço máximo", "roda em ultracode", "modo caro", ou equivalente claro). Aí você dispara com `start ... --effort-max` (ou `resume ... --effort-max` no meio).
+
+**Trava anti-gatilho-fantasma (§4.2):** mencionar "esforço máximo / ultracode" *descrevendo o conceito*, *perguntando* sobre ele, ou *projetando* algo **não** é ordem de acioná-lo. Falar sobre a ferramenta nunca é mandar usá-la. Na dúvida, **não** passe `--effort-max` — rode no Procedimento 1 (o rito de quatro etapas roda sempre, mesmo no P1). Subir pro modo caro por engano queima token à toa.
+
 ## Decidindo o `cwd`
 
 Leia o `CLAUDE.md` global do operador (`$HOME/.claude/CLAUDE.md` se existir) e o `CLAUDE.md` do Kobe (`$KOBE_HOME/CLAUDE.md`) pra entender a convenção de pastas dele. Padrão comum:
