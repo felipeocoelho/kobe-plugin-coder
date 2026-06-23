@@ -7,7 +7,7 @@ diretamente — escreve o state.json e lança `coder_worker.py` em background
 sessão.
 
 Subcomandos:
-    start --cwd <path> --mission "<texto>"
+    start --cwd <path> --task "<texto>"
     resume --session <uuid> --input "<texto>"
     list
     status --session <uuid>
@@ -44,13 +44,6 @@ import presence  # noqa: E402
 
 def _worktree_enabled() -> bool:
     raw = os.environ.get("KOBE_CODER_WORKTREE", "").strip().lower()
-    return raw in ("1", "true", "on", "yes")
-
-
-def _env_sala_mode() -> bool:
-    """Modo sala (--remote-control, visível) via env global. Default OFF. A flag
-    por-dispatch `--sala` no start sobrepõe isto caso-a-caso (sem env, sem restart)."""
-    raw = os.environ.get("KOBE_CODER_SALA_MODE", "").strip().lower()
     return raw in ("1", "true", "on", "yes")
 
 
@@ -232,7 +225,7 @@ def _count_active_sessions_global(kobe_home: Path) -> tuple[int, list[dict]]:
     """Conta sessões em status `starting` ou `running` em TODOS os tópicos.
 
     Faz crash detection inline (PID inexistente = não conta). Retorna
-    (contagem, lista_de_dicts_com_short_id+topic+cwd+mission) — útil pra
+    (contagem, lista_de_dicts_com_short_id+topic+cwd+task) — útil pra
     o caller construir mensagem de erro informativa.
     """
     base = _sessions_dir(kobe_home)
@@ -266,7 +259,7 @@ def _count_active_sessions_global(kobe_home: Path) -> tuple[int, list[dict]]:
                     "short_id": data.get("short_id", ""),
                     "topic_key": data.get("topic_key", tdir.name),
                     "cwd": data.get("cwd", ""),
-                    "mission": (data.get("mission") or "")[:80],
+                    "task": (data.get("task") or "")[:80],
                 }
             )
     return len(active), active
@@ -347,10 +340,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     _cleanup_stale_salas(kobe_home)  # oportunista: mata salas abandonadas/velhas
     topic_key = _topic_key()
     cwd = Path(args.cwd).expanduser().resolve()
-    mission = args.mission.strip()
+    task = args.task.strip()
 
-    if not mission:
-        return _emit({"error": "missão vazia"}, error=True)
+    if not task:
+        return _emit({"error": "tarefa vazia"}, error=True)
 
     # Aviso (não bloqueio) de pasta ocupada — outra instância Claude Code já
     # está mexendo nessa cwd? Retorna `warning: presence_conflict` e não
@@ -437,7 +430,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "short_id": short,
         "topic_key": topic_key,
         "cwd": str(run_cwd),
-        "mission": mission,
+        "task": task,
         "created_at": _now_iso(),
         "last_activity": _now_iso(),
         "status": "starting",
@@ -451,7 +444,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "pending_input": None,
         # Gate PARA-e-espera-OK (§10): edição de código de produção fica
         # bloqueada (hook guard) até o plano ser aprovado. `--approve-plan` no
-        # start pré-aprova (operador mandou missão trivial / pulou o plano).
+        # start pré-aprova (operador mandou tarefa trivial / pulou o plano).
         "plan_approved": bool(getattr(args, "approve_plan", False)),
         # HALT (§7.1): conflito de regras irreconciliável trava a sessão.
         "halted": False,
@@ -463,9 +456,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         # "max" (Procedimento 2, crivo em agentes separados). Só vira "max" por
         # comando explícito do operador — nunca por auto-escalação.
         "effort": "max" if getattr(args, "effort_max", False) else "standard",
-        # Modo sala (--remote-control, visível): decisão POR-DISPATCH (flag --sala
-        # ou env global), gravada aqui pro worker e o resume rotearem por ela.
-        "sala_mode": bool(getattr(args, "sala", False)) or _env_sala_mode(),
+        # Modo sala (--remote-control, visível) — é O MODELO do Coder: toda sessão
+        # abre numa sala tmux navegável. Não é opção do operador; é o caminho.
+        "sala_mode": True,
         # Isolamento por worktree (§13.1) — campos nulos quando desligado.
         **worktree_fields,
     }
@@ -702,7 +695,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
             note = "nada a mesclar (sessão não adicionou commits)."
         else:
             mr = _git(["merge", "--no-ff", "-m",
-                       f"merge coder/{state.get('short_id')}: {state.get('mission','')[:80]}", branch],
+                       f"merge coder/{state.get('short_id')}: {state.get('task','')[:80]}", branch],
                       main, timeout=120)
             if mr.returncode != 0:
                 _git(["merge", "--abort"], main)  # conflito → aborta, NÃO auto-resolve
@@ -764,7 +757,7 @@ def main() -> int:
 
     s = sub.add_parser("start", help="dispara nova sessão remota")
     s.add_argument("--cwd", required=True, help="diretório onde o claude vai rodar")
-    s.add_argument("--mission", required=True, help="texto da missão pra sessão")
+    s.add_argument("--task", required=True, help="texto da tarefa pra sessão")
     s.add_argument(
         "--force",
         action="store_true",
@@ -774,7 +767,7 @@ def main() -> int:
         "--approve-plan",
         dest="approve_plan",
         action="store_true",
-        help="pré-aprova o plano (missão trivial / operador pediu pra pular o "
+        help="pré-aprova o plano (tarefa trivial / operador pediu pra pular o "
         "plano) — libera o gate PARA-e-espera desde o start.",
     )
     s.add_argument(
@@ -783,12 +776,6 @@ def main() -> int:
         action="store_true",
         help="Procedimento 2 (§4): esforço máximo, crivo em agentes separados. "
         "Só quando o operador pediu explicitamente (esforço máximo/ultracode).",
-    )
-    s.add_argument(
-        "--sala",
-        action="store_true",
-        help="abre a sessão como sala tmux --remote-control (VISÍVEL no Desktop) "
-        "em vez de claude -p headless. Opt-in por-dispatch; sobrepõe o env.",
     )
     s.set_defaults(func=cmd_start)
 

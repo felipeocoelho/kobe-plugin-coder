@@ -2,7 +2,7 @@
 """coder_worker.py — wrapper de background pra sessão remota de Claude Code.
 
 Roda como subprocess detached do `run_remote.py`. Lê o state.json, invoca
-`claude -p` com a missão (start) ou input (resume), captura o stream-json
+`claude -p` com a tarefa (start) ou input (resume), captura o stream-json
 linha por linha pra atualizar `last_activity` e `last_text`, e fecha o
 state.json com status final quando o claude sai.
 
@@ -280,11 +280,11 @@ def _build_prompt(state: dict, mode: str) -> str:
 
     O system prompt (base operacional + harness) vai EXCLUSIVAMENTE via
     `--append-system-prompt` (ver `_build_system_prompt`); o stdin carrega só
-    a carga de trabalho: a missão (start) ou a nova entrada do operador
+    a carga de trabalho: a tarefa (start) ou a nova entrada do operador
     (resume). Não há injeção dupla do system prompt.
     """
     if mode == "start":
-        return state["mission"]
+        return state["task"]
     # resume
     return state.get("pending_input") or "(operador não passou conteúdo na retomada — continue de onde parou)"
 
@@ -677,19 +677,12 @@ def _looks_like_kobe_notify_was_sent(state: dict, kobe_home: Path) -> bool:
 
 
 # ───────────────────────── Modo sala (--remote-control) ─────────────────────
-# Dispatch alternativo (atrás de KOBE_CODER_SALA_MODE): em vez de `claude -p`
-# headless, abre a sessão como sala tmux `--remote-control` — VISÍVEL/navegável
-# no Claude Code Desktop — e, no esforço máximo, JÁ EM ULTRACODE (via --settings,
-# provado 2026-06-23). ADITIVO: o caminho `claude -p` (run_claude) fica intocado;
-# este só roda com o flag ligado. O worker aqui é um LANÇADOR FINO — a sala vive
-# sozinha no tmux e reporta progresso por `kobe-notify` (ritual de sempre); o
-# "resume" injeta input na sala viva via `tmux send-keys` (provado, T2).
-
-
-def _sala_mode() -> bool:
-    return os.environ.get("KOBE_CODER_SALA_MODE", "").strip().lower() in {
-        "1", "true", "yes", "on",
-    }
+# O MODELO de dispatch do Coder: em vez de `claude -p` headless, a sessão abre
+# como sala tmux `--remote-control` — VISÍVEL/navegável no Claude Code Desktop —
+# e, no esforço máximo, já em ULTRACODE (via --settings, provado 2026-06-23). O
+# `claude -p` (run_claude) fica como código dormente/fallback interno, não como
+# escolha do operador. O worker LANÇA a sala e fica MONITORANDO (status + watcher
+# de morte); o "resume" injeta input na sala viva via `tmux send-keys` (T2).
 
 
 def _sala_name(state: dict) -> str:
@@ -714,13 +707,13 @@ def _claude_pid_for_sala(sala: str) -> int | None:
 
 def _write_sala_brief(state: dict, brief_path: Path) -> None:
     sala = _sala_name(state)
-    mission = (state.get("mission") or "(missão não registrada)").strip()
+    task = (state.get("task") or "(tarefa não registrada)").strip()
     brief_path.write_text(
         f"# Sala Coder `{sala}` — sessão de desenvolvimento\n\n"
         f"> Você é uma sessão de código Claude rodando em tmux "
         f"(`--remote-control {sala}`), disparada pelo Coder. Este arquivo é a tua "
         f"fonte de verdade — leia inteiro antes de agir.\n\n"
-        f"## Missão\n\n{mission}\n\n"
+        f"## Tarefa\n\n{task}\n\n"
         f"## Rito de codificação (obrigatório)\n"
         f"Para cada unidade de código: **Planejamento → Advogado do Diabo → "
         f"Revisão → Testes** (testes em dev VPS, na medida do possível). As regras "
@@ -912,7 +905,7 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
         kobe_home,
         f"🟢 [coder] sala `{sala}` aberta e visível no Claude Code Desktop"
         + (" (ultracode ligado)" if effort == "max" else "")
-        + ". Trabalhando na missão; reporto os marcos por aqui.",
+        + ". Trabalhando na tarefa; reporto os marcos por aqui.",
     )
     return _monitor_sala(state_path, sala, kobe_home)
 
@@ -954,10 +947,10 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _on_term)
 
     try:
-        # Modo sala (--remote-control, visível): a decisão é POR-DISPATCH, gravada
-        # no state pelo cmd_start (via flag --sala ou env), com fallback no env do
-        # worker. Senão, o `claude -p` de sempre (aditivo: default inalterado).
-        runner = run_sala if (state.get("sala_mode") or _sala_mode()) else run_claude
+        # Modo sala (--remote-control, visível) é O MODELO do Coder (cmd_start grava
+        # sala_mode=True). run_claude (claude -p) fica como código dormente/fallback
+        # interno, não como escolha do operador.
+        runner = run_sala if state.get("sala_mode") else run_claude
         return runner(state_path=state_path, mode=args.mode, kobe_home=kobe_home)
     except Exception as exc:  # noqa: BLE001 — captura tudo pra deixar state sano
         logger.exception("worker exception")
