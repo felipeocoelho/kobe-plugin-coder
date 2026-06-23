@@ -738,8 +738,78 @@ def _write_sala_brief(state: dict, brief_path: Path) -> None:
     )
 
 
+_SALA_POLL_SECONDS = 8
+_SALA_MONITOR_MAX_SECONDS = 6 * 3600  # backstop: não deixa um worker imortal
+
+
+def _pane_busy(pane: str) -> bool:
+    # O claude mostra "esc to interrupt" na status bar enquanto processa um turno;
+    # idle (esperando input) NÃO mostra. Sinal robusto observado nos spikes (T2).
+    return "esc to interrupt" in pane
+
+
+def _extract_pane_last(pane: str) -> str | None:
+    # Best-effort: a última fala do claude no pane (linhas com "●"). A TUI é
+    # ruidosa — isto é só um preview grosso pro /coder-status; a fonte real pro
+    # operador é a própria sala (Desktop) + os kobe-notify dela.
+    bullets = [l.strip() for l in pane.splitlines() if l.lstrip().startswith("●")]
+    return (bullets[-1].lstrip("● ").strip() or None) if bullets else None
+
+
+def _monitor_sala(state_path: Path, sala: str, kobe_home: Path) -> int:
+    """Fica vivo observando a sala DURANTE o turno (o worker não morre no launch).
+
+    - Atualiza status (running/idle) e last_text lendo o `capture-pane`.
+    - Detecta MORTE silenciosa (a sala caiu) → marca dead + avisa (watcher).
+    - Heartbeat: avisa se o turno passa muito tempo sem encerrar.
+    - ENCERRA quando a sala fica idle (turno terminou) — a sala segue VIVA pro
+      próximo resume. Morte-entre-turnos (sala cai sem worker olhando) é pega no
+      próximo resume (has-session) e pela limpeza oportunista do start.
+    """
+    started = time.monotonic()
+    last_hb = started
+    hb_interval = _heartbeat_interval()
+    saw_busy = False
+    idle_streak = 0
+    # Margem de boot: o claude leva alguns segundos pra subir; sem isso o monitor
+    # poderia ver "idle" no boot e encerrar antes do turno começar.
+    time.sleep(_SALA_POLL_SECONDS)
+    while True:
+        if not _tmux_has_session(sala):
+            _patch_state(state_path, status="dead", exit_code=-1,
+                         last_text="sala tmux caiu (morte detectada pelo monitor).")
+            _notify_error(kobe_home,
+                          f"🔴 [coder] a sala `{sala}` caiu durante o turno. "
+                          f"Abra uma nova pra continuar.")
+            return 1
+        pane = _tmux("capture-pane", "-t", sala, "-p").stdout
+        last_text = _extract_pane_last(pane)
+        elapsed = time.monotonic() - started
+        if _pane_busy(pane):
+            saw_busy = True
+            idle_streak = 0
+            _patch_state(state_path, status="running", last_text=last_text)
+            if time.monotonic() - last_hb >= hb_interval:
+                _notify_error(kobe_home,
+                              f"⏳ [coder] sala `{sala}` trabalhando há "
+                              f"{_fmt_elapsed(elapsed)} — ainda em andamento.")
+                last_hb = time.monotonic()
+        else:
+            # Idle. Exige 2 leituras idle seguidas (evita a janela curta entre
+            # duas tool calls). Confirma se: viu busy e agora 2x idle; OU nunca
+            # viu busy mas já passou tempo (turno trivial que terminou rápido).
+            idle_streak += 1
+            if (saw_busy and idle_streak >= 2) or (not saw_busy and elapsed > 60):
+                _patch_state(state_path, status="idle", last_text=last_text)
+                return 0
+        if elapsed > _SALA_MONITOR_MAX_SECONDS:
+            # Backstop: solta o worker (a sala continua viva); status fica como está.
+            return 0
+        time.sleep(_SALA_POLL_SECONDS)
+
+
 def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
-    """Dispatch em modo sala tmux `--remote-control` (lançador fino).
+    """Dispatch em modo sala tmux `--remote-control` (lançador + monitor).
 
     start  → escreve o brief, monta settings (guard + ultracode-se-max), abre a
              sala tmux e sai (a sala vive sozinha; reporta por kobe-notify).
@@ -768,7 +838,7 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
         _patch_state(state_path, status="running", pending_input=None,
                      last_activity=_now_iso(),
                      turn_count=(state.get("turn_count") or 0) + 1)
-        return 0
+        return _monitor_sala(state_path, sala, kobe_home)
 
     # mode == "start"
     salas_dir = cwd / ".local" / "salas"
@@ -844,7 +914,7 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
         + (" (ultracode ligado)" if effort == "max" else "")
         + ". Trabalhando na missão; reporto os marcos por aqui.",
     )
-    return 0
+    return _monitor_sala(state_path, sala, kobe_home)
 
 
 def main() -> int:
@@ -870,8 +940,8 @@ def main() -> int:
         print(f"state file não existe: {state_path}", file=sys.stderr)
         return 2
 
-    # Sinaliza no state que estamos rodando
-    _patch_state(state_path, worker_started_at=_now_iso(), worker_pid=os.getpid())
+    # Sinaliza no state que estamos rodando (e captura pra rotear o modo).
+    state = _patch_state(state_path, worker_started_at=_now_iso(), worker_pid=os.getpid())
 
     # Tratamento de SIGTERM (quando o supervisord/operador matar)
     def _on_term(signum, frame):  # noqa: ANN001 — handler
@@ -884,9 +954,10 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _on_term)
 
     try:
-        # Modo sala (--remote-control, visível) atrás do flag; senão o `claude -p`
-        # de sempre (aditivo: default inalterado até o flag virar).
-        runner = run_sala if _sala_mode() else run_claude
+        # Modo sala (--remote-control, visível): a decisão é POR-DISPATCH, gravada
+        # no state pelo cmd_start (via flag --sala ou env), com fallback no env do
+        # worker. Senão, o `claude -p` de sempre (aditivo: default inalterado).
+        runner = run_sala if (state.get("sala_mode") or _sala_mode()) else run_claude
         return runner(state_path=state_path, mode=args.mode, kobe_home=kobe_home)
     except Exception as exc:  # noqa: BLE001 — captura tudo pra deixar state sano
         logger.exception("worker exception")

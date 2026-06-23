@@ -47,6 +47,59 @@ def _worktree_enabled() -> bool:
     return raw in ("1", "true", "on", "yes")
 
 
+def _env_sala_mode() -> bool:
+    """Modo sala (--remote-control, visível) via env global. Default OFF. A flag
+    por-dispatch `--sala` no start sobrepõe isto caso-a-caso (sem env, sem restart)."""
+    raw = os.environ.get("KOBE_CODER_SALA_MODE", "").strip().lower()
+    return raw in ("1", "true", "on", "yes")
+
+
+def _cleanup_stale_salas(kobe_home: Path) -> None:
+    """Mata salas coder-* abandonadas: estado terminal (dead/failed/…) ou inativas
+    há mais que o TTL (KOBE_CODER_SALA_TTL_HOURS, default 24h). Oportunista (no
+    start), best-effort — nunca bloqueia o dispatch. Evita acúmulo de salas vivas.
+    """
+    try:
+        r = subprocess.run(["tmux", "list-sessions", "-F", "#{session_name}"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            return
+        salas = [s for s in r.stdout.split() if s.startswith("coder-")]
+        if not salas:
+            return
+        try:
+            ttl_h = float(os.environ.get("KOBE_CODER_SALA_TTL_HOURS", "24") or 24)
+        except ValueError:
+            ttl_h = 24.0
+        by_short: dict[str, dict] = {}
+        for sp in (kobe_home / "user-data" / "coder-sessions").glob("*/*.json"):
+            try:
+                d = json.loads(sp.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                continue
+            if d.get("short_id"):
+                by_short[d["short_id"]] = d
+        terminal = {"dead", "failed", "terminated", "crashed", "merged"}
+        now = datetime.now(timezone.utc)
+        for sala in salas:
+            st = by_short.get(sala[len("coder-"):])
+            if st is None:
+                continue  # sem state conhecido — não é nossa / não mexe
+            kill = st.get("status") in terminal
+            if not kill and st.get("last_activity"):
+                try:
+                    age_h = (now - datetime.fromisoformat(
+                        st["last_activity"])).total_seconds() / 3600
+                    kill = age_h > ttl_h
+                except Exception:  # noqa: BLE001
+                    pass
+            if kill:
+                subprocess.run(["tmux", "kill-session", "-t", sala],
+                               capture_output=True, text=True)
+    except Exception:  # noqa: BLE001 — limpeza é best-effort
+        pass
+
+
 def _git(args: list[str], cwd: str | Path, timeout: int = 60) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["git", "-C", str(cwd), *args],
@@ -291,6 +344,7 @@ def _spawn_worker(state_path: Path, mode: str, log_path: Path) -> int:
 
 def cmd_start(args: argparse.Namespace) -> int:
     kobe_home = _kobe_home()
+    _cleanup_stale_salas(kobe_home)  # oportunista: mata salas abandonadas/velhas
     topic_key = _topic_key()
     cwd = Path(args.cwd).expanduser().resolve()
     mission = args.mission.strip()
@@ -409,6 +463,9 @@ def cmd_start(args: argparse.Namespace) -> int:
         # "max" (Procedimento 2, crivo em agentes separados). Só vira "max" por
         # comando explícito do operador — nunca por auto-escalação.
         "effort": "max" if getattr(args, "effort_max", False) else "standard",
+        # Modo sala (--remote-control, visível): decisão POR-DISPATCH (flag --sala
+        # ou env global), gravada aqui pro worker e o resume rotearem por ela.
+        "sala_mode": bool(getattr(args, "sala", False)) or _env_sala_mode(),
         # Isolamento por worktree (§13.1) — campos nulos quando desligado.
         **worktree_fields,
     }
@@ -726,6 +783,12 @@ def main() -> int:
         action="store_true",
         help="Procedimento 2 (§4): esforço máximo, crivo em agentes separados. "
         "Só quando o operador pediu explicitamente (esforço máximo/ultracode).",
+    )
+    s.add_argument(
+        "--sala",
+        action="store_true",
+        help="abre a sessão como sala tmux --remote-control (VISÍVEL no Desktop) "
+        "em vez de claude -p headless. Opt-in por-dispatch; sobrepõe o env.",
     )
     s.set_defaults(func=cmd_start)
 
