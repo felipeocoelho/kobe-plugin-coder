@@ -453,7 +453,11 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     state = json.loads(state_path.read_text(encoding="utf-8"))
     status = state.get("status")
-    if status in {"running", "starting"}:
+    # Modo sala: resume = `tmux send-keys` numa sala interativa que PERSISTE — não
+    # depende do turno encerrar (diferente do claude -p, que morre por turno). A
+    # checagem de "running" só vale pro caminho headless; no modo sala, run_sala
+    # trata o caso de sala morta.
+    if not state.get("sala_mode") and status in {"running", "starting"}:
         return _emit(
             {
                 "error": (

@@ -311,7 +311,7 @@ def _effort_flags(effort: str) -> list[str]:
 
 
 def _build_session_settings(
-    plugin_root: Path, kobe_home: Path, state_path: Path
+    plugin_root: Path, kobe_home: Path, state_path: Path, effort: str = "standard"
 ) -> Path | None:
     """Escreve o settings.json da sessão que liga o hook `guard` (PreToolUse).
 
@@ -326,20 +326,30 @@ def _build_session_settings(
     avisado pelo prompt de que está sem rede). Fail-open consciente: um gate que
     quebra a sessão por bug de instalação seria pior que a ausência do gate.
     """
+    settings: dict = {}
+    # Esforço máximo (§4) = ULTRACODE: liga xhigh + orquestração de agentes já no
+    # BOOT da sessão. Provado (cobaia 2026-06-23): `--settings {"ultracode": true}`
+    # liga o modo no lançamento — o gatilho no prompt NÃO funciona. Convive com o
+    # hook do guard no mesmo objeto de settings (chaves distintas) — provado (T1).
+    # Só o caminho-sala passa effort; o caller do `claude -p` mantém o default
+    # "standard", então o caminho headless segue intocado (aditivo).
+    if effort == "max":
+        settings["ultracode"] = True
+    # O guard é o enforcement de código dos gates do contrato (PreToolUse deny):
+    # um hook que devolve `permissionDecision: deny` barra a ferramenta MESMO sob
+    # `bypassPermissions` — única forma de travar a sessão autônoma antes da ação.
     guard = plugin_root / "harness" / "hooks" / "guard.py"
-    if not guard.is_file():
-        return None
-    venv_python = kobe_home / ".venv" / "bin" / "python"
-    python = str(venv_python) if venv_python.is_file() else "python3"
-    # O path do state vai como ARGV do hook (controlado pelo worker), NÃO no env
-    # da sessão — assim a sessão não conhece o path do próprio cadeado e não
-    # pode reescrever plan_approved/halted via Bash (B1 da revisão).
-    hook_cmd = (
-        f"{shlex.quote(python)} {shlex.quote(str(guard))} "
-        f"--state {shlex.quote(str(state_path))}"
-    )
-    settings = {
-        "hooks": {
+    if guard.is_file():
+        venv_python = kobe_home / ".venv" / "bin" / "python"
+        python = str(venv_python) if venv_python.is_file() else "python3"
+        # O path do state vai como ARGV do hook (controlado pelo worker), NÃO no env
+        # da sessão — assim a sessão não conhece o path do próprio cadeado e não
+        # pode reescrever plan_approved/halted via Bash (B1 da revisão).
+        hook_cmd = (
+            f"{shlex.quote(python)} {shlex.quote(str(guard))} "
+            f"--state {shlex.quote(str(state_path))}"
+        )
+        settings["hooks"] = {
             "PreToolUse": [
                 {
                     "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
@@ -347,7 +357,9 @@ def _build_session_settings(
                 }
             ]
         }
-    }
+    # Sem guard e sem ultracode → nada a injetar (sessão roda sem settings extra).
+    if not settings:
+        return None
     # Fora do diretório de estado e da extensão `*.json` — senão o settings
     # colidiria com o glob `<short_id>*.json` de _resolve_session e quebraria
     # resume/status/halt/merge por short-id (B2 da revisão). Subdir `.settings/`.
@@ -664,6 +676,177 @@ def _looks_like_kobe_notify_was_sent(state: dict, kobe_home: Path) -> bool:
     return "kobe-notify" in tail or "kobe-attach" in tail
 
 
+# ───────────────────────── Modo sala (--remote-control) ─────────────────────
+# Dispatch alternativo (atrás de KOBE_CODER_SALA_MODE): em vez de `claude -p`
+# headless, abre a sessão como sala tmux `--remote-control` — VISÍVEL/navegável
+# no Claude Code Desktop — e, no esforço máximo, JÁ EM ULTRACODE (via --settings,
+# provado 2026-06-23). ADITIVO: o caminho `claude -p` (run_claude) fica intocado;
+# este só roda com o flag ligado. O worker aqui é um LANÇADOR FINO — a sala vive
+# sozinha no tmux e reporta progresso por `kobe-notify` (ritual de sempre); o
+# "resume" injeta input na sala viva via `tmux send-keys` (provado, T2).
+
+
+def _sala_mode() -> bool:
+    return os.environ.get("KOBE_CODER_SALA_MODE", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+def _sala_name(state: dict) -> str:
+    return f"coder-{state['short_id']}"  # label que aparece no app
+
+
+def _tmux(*args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["tmux", *args], capture_output=True, text=True)
+
+
+def _tmux_has_session(name: str) -> bool:
+    return _tmux("has-session", "-t", name).returncode == 0
+
+
+def _claude_pid_for_sala(sala: str) -> int | None:
+    r = subprocess.run(
+        ["pgrep", "-f", f"remote-control {sala}"], capture_output=True, text=True
+    )
+    pids = [int(p) for p in r.stdout.split() if p.strip().isdigit()]
+    return pids[0] if pids else None
+
+
+def _write_sala_brief(state: dict, brief_path: Path) -> None:
+    sala = _sala_name(state)
+    mission = (state.get("mission") or "(missão não registrada)").strip()
+    brief_path.write_text(
+        f"# Sala Coder `{sala}` — sessão de desenvolvimento\n\n"
+        f"> Você é uma sessão de código Claude rodando em tmux "
+        f"(`--remote-control {sala}`), disparada pelo Coder. Este arquivo é a tua "
+        f"fonte de verdade — leia inteiro antes de agir.\n\n"
+        f"## Missão\n\n{mission}\n\n"
+        f"## Rito de codificação (obrigatório)\n"
+        f"Para cada unidade de código: **Planejamento → Advogado do Diabo → "
+        f"Revisão → Testes** (testes em dev VPS, na medida do possível). As regras "
+        f"completas (reversibilidade, gates, deploy, changelog) estão no teu system "
+        f"prompt (contrato do Coder).\n\n"
+        f"## Sinais de vida (NÃO fique mudo)\n"
+        f"Reporte cada marco pro operador via `bot/bin/kobe-notify`: início, "
+        f"conclusão de cada fase, bloqueios que exijam decisão dele, e o FIM. "
+        f"Entregue artefatos com `bot/bin/kobe-attach <path>`.\n\n"
+        f"## Turnos\n"
+        f"Quando terminar (ou precisar de input), **termine o turno** (pare e "
+        f"aguarde). O operador te retoma mandando a próxima mensagem — ela chega "
+        f"aqui na sala. Não fique em loop interativo.\n",
+        encoding="utf-8",
+    )
+
+
+def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
+    """Dispatch em modo sala tmux `--remote-control` (lançador fino).
+
+    start  → escreve o brief, monta settings (guard + ultracode-se-max), abre a
+             sala tmux e sai (a sala vive sozinha; reporta por kobe-notify).
+    resume → injeta o pending_input na sala viva via `tmux send-keys` (T2).
+    """
+    state = _read_state(state_path)
+    cwd = Path(state["cwd"])
+    sala = _sala_name(state)
+    plugin_root = Path(__file__).resolve().parent.parent
+
+    if mode == "resume":
+        if not _tmux_has_session(sala):
+            _patch_state(state_path, status="failed",
+                         last_text="sala tmux não está mais viva.")
+            _notify_error(
+                kobe_home,
+                f"🔴 [coder] sessão `{state['short_id']}` — a sala `{sala}` não "
+                f"está mais viva; não dá pra retomar. Abra uma nova.",
+            )
+            return 1
+        pending = (state.get("pending_input") or "").strip()
+        if pending:
+            # send-keys em dois tempos: texto literal (-l), depois Enter. Provado (T2).
+            _tmux("send-keys", "-t", sala, "-l", pending)
+            _tmux("send-keys", "-t", sala, "Enter")
+        _patch_state(state_path, status="running", pending_input=None,
+                     last_activity=_now_iso(),
+                     turn_count=(state.get("turn_count") or 0) + 1)
+        return 0
+
+    # mode == "start"
+    salas_dir = cwd / ".local" / "salas"
+    salas_dir.mkdir(parents=True, exist_ok=True)
+    brief_path = salas_dir / f"{sala}.md"
+    _write_sala_brief(state, brief_path)
+
+    effort = state.get("effort", "standard")
+    settings_path = _build_session_settings(plugin_root, kobe_home, state_path, effort)
+    # System prompt (~28KB) vai por ARQUIVO pra a linha de lançamento ficar curta
+    # (regra das salas: nada de argv gigante poluindo o ps). O launcher lê e passa.
+    sysprompt_path = salas_dir / f"{sala}.sysprompt.txt"
+    sysprompt_path.write_text(_build_system_prompt(plugin_root, cwd, effort),
+                              encoding="utf-8")
+    launch_prompt = (
+        f"Leia .local/salas/{sala}.md — é o teu briefing completo desta sala. "
+        f"Comece por aí, sob o rito de 4 etapas."
+    )
+    settings_arg = (
+        f"--settings {shlex.quote(str(settings_path))} " if settings_path else ""
+    )
+    launcher = salas_dir / f"{sala}-launch.sh"
+    launcher.write_text(
+        "#!/bin/bash\n"
+        f"cd {shlex.quote(str(cwd))}\n"
+        f"exec claude --permission-mode bypassPermissions "
+        f"--remote-control {shlex.quote(sala)} {settings_arg}"
+        f'--append-system-prompt "$(cat {shlex.quote(str(sysprompt_path))})" '
+        f"{shlex.quote(launch_prompt)}\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+
+    # Envs do Telegram pra a sala (kobe-notify/attach) via tmux -e — a sala não
+    # herda o env do worker de outra forma. Só passa o que existe.
+    tmux_cmd = ["tmux", "new-session", "-d", "-s", sala, "-c", str(cwd)]
+    for k in ("KOBE_CHAT_ID", "KOBE_THREAD_ID", "KOBE_TELEGRAM_BOT_TOKEN"):
+        v = os.environ.get(k)
+        if v:
+            tmux_cmd += ["-e", f"{k}={v}"]
+    tmux_cmd += [f"bash {shlex.quote(str(launcher))}"]
+
+    proc = subprocess.run(tmux_cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        _patch_state(state_path, status="failed", exit_code=proc.returncode,
+                     last_text=f"falha abrindo sala tmux: {proc.stderr.strip()}")
+        _notify_error(kobe_home,
+                      f"🔴 [coder] não consegui abrir a sala `{sala}`: "
+                      f"{proc.stderr.strip()}")
+        return 1
+
+    # PID do claude da sala (presença/status). Pode levar um instante pra subir.
+    claude_pid = None
+    for _ in range(10):
+        claude_pid = _claude_pid_for_sala(sala)
+        if claude_pid:
+            break
+        time.sleep(1)
+
+    _patch_state(state_path, status="running", sala_name=sala, sala_mode=True,
+                 pid=claude_pid, last_activity=_now_iso())
+    if claude_pid:
+        try:
+            presence.register(source="telegram-coder-sala", cwd=state["cwd"],
+                              session_id=state["session_id"],
+                              topic_key=state.get("topic_key"), pid=claude_pid)
+        except Exception:  # noqa: BLE001
+            logger.exception("falha registrando presença da sala")
+
+    _notify_error(
+        kobe_home,
+        f"🟢 [coder] sala `{sala}` aberta e visível no Claude Code Desktop"
+        + (" (ultracode ligado)" if effort == "max" else "")
+        + ". Trabalhando na missão; reporto os marcos por aqui.",
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Worker de sessão remota Claude Code")
     parser.add_argument("--state-file", required=True, type=Path)
@@ -701,7 +884,10 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _on_term)
 
     try:
-        return run_claude(state_path=state_path, mode=args.mode, kobe_home=kobe_home)
+        # Modo sala (--remote-control, visível) atrás do flag; senão o `claude -p`
+        # de sempre (aditivo: default inalterado até o flag virar).
+        runner = run_sala if _sala_mode() else run_claude
+        return runner(state_path=state_path, mode=args.mode, kobe_home=kobe_home)
     except Exception as exc:  # noqa: BLE001 — captura tudo pra deixar state sano
         logger.exception("worker exception")
         try:
