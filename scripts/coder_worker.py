@@ -1044,8 +1044,11 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
 
     effort = state.get("effort", "standard")
     settings_path = _build_session_settings(plugin_root, kobe_home, state_path, effort)
-    # System prompt (~28KB) vai por ARQUIVO pra a linha de lançamento ficar curta
-    # (regra das salas: nada de argv gigante poluindo o ps). O launcher lê e passa.
+    # System prompt (~28KB) vai por ARQUIVO via `--append-system-prompt-file`
+    # (Item 4, preferência do operador): o CLI lê o arquivo direto — a linha de
+    # lançamento fica curta (nada de 28KB no `ps`), some o `$(cat ...)` (que
+    # dependia de locale/PYTHONUTF8 e podia mangle trailing newline), e a injeção
+    # do briefing fica mais fiel (conteúdo raw, não pós-bash).
     sysprompt_path = salas_dir / f"{sala}.sysprompt.txt"
     sysprompt_path.write_text(_build_system_prompt(plugin_root, cwd, effort),
                               encoding="utf-8")
@@ -1062,7 +1065,7 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
         f"cd {shlex.quote(str(cwd))}\n"
         f"exec claude --permission-mode bypassPermissions "
         f"--remote-control {shlex.quote(sala)} {settings_arg}"
-        f'--append-system-prompt "$(cat {shlex.quote(str(sysprompt_path))})" '
+        f"--append-system-prompt-file {shlex.quote(str(sysprompt_path))} "
         f"{shlex.quote(launch_prompt)}\n",
         encoding="utf-8",
     )

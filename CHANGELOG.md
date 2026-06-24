@@ -59,6 +59,20 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert`. Sem o resumo, volta ao comportamento anterior (só `status=dead`/`failed` no state). `head_sha_at_start` é campo extra inócuo.
 
+### Item 4 — injeção do system prompt via `--append-system-prompt-file` (preferência do operador)
+
+**Operador pediu:** adotar `--append-system-prompt-file` como mecanismo de injeção do briefing/system prompt no dispatch da sala, no lugar de `--append-system-prompt "$(cat ...)"`.
+
+**Por quê:** o caminho-sala já escrevia o system prompt (~28KB: base operacional + harness) num arquivo, mas o passava via `--append-system-prompt "$(cat arquivo)"` — 28KB no argv (polui o `ps`), dependência de locale/`PYTHONUTF8` na fronteira do `$(cat)`, e o bash come o newline final (mangle sutil). O CLI suporta `--append-system-prompt-file <file>` (verificado real no CLI: "argument missing" pro flag, vs "unknown option" pra um flag fake), que lê o arquivo direto e raw.
+
+**Foi feito:** o launcher da sala troca `--append-system-prompt "$(cat sysprompt)"` por `--append-system-prompt-file sysprompt`. Linha de lançamento curta, sem 28KB no `ps`, conteúdo raw (mais fiel). `run_claude` (headless, dormente) segue via argv — não-alcançável pelo roteador, sem benefício live em mexer.
+
+**Testes (ambiente de desenvolvimento):** `py_compile`; flag confirmado real no CLI (sem chamada de API); launcher gerado passa `bash -n`, usa `--append-system-prompt-file` e não tem mais `$(cat)`; paridade do conteúdo preservada (o arquivo raw é a fonte — preserva inclusive o newline final que o `$(cat)` comeria).
+
+**Commits:** ver `git log`. **NÃO publicado.**
+
+**Reversão:** aditiva — `git revert`. Volta ao `--append-system-prompt "$(cat ...)"`. O arquivo do sysprompt segue sendo escrito igual.
+
 ## [0.7.0] — 2026-06-23 — Faxina de privacidade: split do deploy (camada D) + despersonalização
 
 **Operador pediu:** o plugin é público e vazava o ambiente pessoal do operador pro GitHub — os termos do deploy dele cravados no contrato, caminhos absolutos, o nome do operador e o nome do agente. Tirar tudo isso do que é público, sem perder a função.
