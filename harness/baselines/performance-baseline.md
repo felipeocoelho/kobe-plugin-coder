@@ -1,4 +1,4 @@
-# Performance Baseline — método universal para projetos Felipe/Hal
+# Performance Baseline — método universal para projetos do operador
 
 Documento de método. Não é checklist binário. Define **o que medir**, **como medir**, e **como cada projeto registra os próprios SLOs no próprio CLAUDE.md**. Performance não tem estado "fechado/aberto" — tem "dentro do alvo / fora do alvo".
 

@@ -1,6 +1,6 @@
 # UX Baseline
 
-Padrão de experiência do usuário aplicável a qualquer projeto do Felipe que tenha um humano do outro lado — bot de mensageiro, web app, app nativo, CLI. Complementa `harness/baselines/performance-baseline.md` (latência *real*; aqui cuidamos da latência *percebida* e do resto da experiência), `harness/baselines/security-baseline.md` e `harness/baselines/code-quality-baseline.md`.
+Padrão de experiência do usuário aplicável a qualquer projeto do operador que tenha um humano do outro lado — bot de mensageiro, web app, app nativo, CLI. Complementa `harness/baselines/performance-baseline.md` (latência *real*; aqui cuidamos da latência *percebida* e do resto da experiência), `harness/baselines/security-baseline.md` e `harness/baselines/code-quality-baseline.md`.
 
 ## Por que este baseline tem forma diferente dos outros
 
@@ -15,7 +15,7 @@ Por isso este documento é **núcleo universal + módulos por superfície**, esp
 
 ### Aviso de calibração honesto
 
-Diferente da baseline de segurança (engenharia assentada, tem certo e errado), UX carrega **mais gosto e mais opinião**. O **núcleo universal** e o **módulo mensageiro** têm alta confiança — o primeiro é pesquisa consolidada, o segundo é consolidação do que o Felipe já ensinou pagando com erro. Os módulos web/nativo, quando escritos, trazem expertise que o Felipe não tem vocabulário pra auditar — então a responsabilidade de acertar é do agente, e a calibração vem do **gosto de usuário** do Felipe ("isso me irritaria? isso me ajudaria?"), não de vocabulário de UX. Onde houver dúvida real de gosto, **marcar** em vez de fingir certeza.
+Diferente da baseline de segurança (engenharia assentada, tem certo e errado), UX carrega **mais gosto e mais opinião**. O **núcleo universal** e o **módulo mensageiro** têm alta confiança — o primeiro é pesquisa consolidada, o segundo é consolidação do que o operador já ensinou pagando com erro. Os módulos web/nativo, quando escritos, trazem expertise que o operador não tem vocabulário pra auditar — então a responsabilidade de acertar é do agente, e a calibração vem do **gosto de usuário** do operador ("isso me irritaria? isso me ajudaria?"), não de vocabulário de UX. Onde houver dúvida real de gosto, **marcar** em vez de fingir certeza.
 
 ### Como usar
 
@@ -130,7 +130,7 @@ Operação irreversível (apagar, sobrescrever, enviar pra terceiro, gastar recu
 
 ### 2.12 Tom
 
-Português brasileiro, conversacional, direto, sem floreio. Honestidade > complacência. Quando errar, reconheça e corrija sem auto-flagelação. (Ajuste fino por operador vive em `user-data/identity/PREFERENCES.md` — **isso é preferência do operador, não regra universal**; não confundir o tom-padrão com o gosto específico do Felipe.)
+Português brasileiro, conversacional, direto, sem floreio. Honestidade > complacência. Quando errar, reconheça e corrija sem auto-flagelação. (Ajuste fino por operador vive em `user-data/identity/PREFERENCES.md` — **isso é preferência do operador, não regra universal**; não confundir o tom-padrão com o gosto específico do operador.)
 
 ---
 

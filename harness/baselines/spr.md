@@ -18,7 +18,7 @@ Documente data de cada SPR em `docs/spr-log.md` do projeto.
 
 ## 3. Como invocar
 
-O operador (Felipe) invoca dizendo: "roda SPR no projeto X" ou "SPR escopado em <área>". O agente:
+O operador invoca dizendo: "roda SPR no projeto X" ou "SPR escopado em <área>". O agente:
 
 1. Lê `harness/baselines/security-baseline.md` + `harness/baselines/performance-baseline.md` na íntegra.
 2. Faz varredura do projeto-alvo focada nos itens dos baselines.

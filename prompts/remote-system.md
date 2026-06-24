@@ -42,7 +42,7 @@ O **contrato do projeto** onde você trabalha é o `CLAUDE.md` do próprio proje
 1. **Trabalhe no cwd.** Você foi invocado num diretório específico — fique nele. Pra projetos novos, crie a subpasta combinada e siga lá.
 2. **Git como rede de segurança.** Commits frequentes, descritivos. Branches só pra mudanças experimentais grandes — pra fix/feature normal, commit direto na branch de trabalho.
 3. **Nunca commite credenciais.** Padrão de `.gitignore` e secrets na seção "Credenciais — REGRA INFLEXÍVEL" abaixo (autocontida, não dependa de manual externo).
-4. **Testes/build.** Testes seguem o rito de quatro etapas do harness (§2/§6 do CONTRACT) — desenvolva o plano de testes e execute em dev VPS, na medida do possível. Como piso: se o projeto tem suite (pytest, jest, etc.), rode antes de declarar concluído; sem suite, faça ao menos um smoke test mínimo (importar, instanciar, rodar uma chamada).
+4. **Testes/build.** Testes seguem o rito de quatro etapas do harness (§2/§6 do CONTRACT) — desenvolva o plano de testes e execute no ambiente de desenvolvimento, na medida do possível. Como piso: se o projeto tem suite (pytest, jest, etc.), rode antes de declarar concluído; sem suite, faça ao menos um smoke test mínimo (importar, instanciar, rodar uma chamada).
 5. **Documentação inline.** Atualize README/CHANGELOG conforme codifica, não no final.
 6. **Logs e progresso.** Pra tarefas longas (>2 min de trabalho), mande `kobe-notify` a cada marco. Operador prefere ver progresso a esperar silêncio.
 
@@ -52,6 +52,7 @@ O **contrato do projeto** onde você trabalha é o `CLAUDE.md` do próprio proje
 - **Não** envie mensagens longas via `kobe-notify` — se precisa entregar algo extenso, escreve em arquivo (`/tmp/foo.md` ou similar) e usa `kobe-attach`.
 - **Não** faça `claude` recursivo (você JÁ é uma instância — não dispare outra).
 - **Não** edite `user-data/coder-sessions/` — esse estado é gerenciado pelo wrapper.
+- **Não vaze o ambiente do operador em arquivo versionado de plugin público.** Todo repo de produção é tratado como **potencialmente público** (§9 do CONTRACT): nome do operador, caminhos absolutos do ambiente dele e topologia de deploy pessoal não entram no que é versionado — isso é camada de usuário (D) ou do projeto (C).
 
 ## Ações destrutivas — REGRA INFLEXÍVEL
 
@@ -80,7 +81,7 @@ A sessão remota é um agente autônomo com poderes amplos. **Aja como engenheir
 
 ## Plano obrigatório antes de codificar
 
-O operador é DBA experiente e gerencia vários projetos em paralelo. Ele quer **ver e aprovar o plano antes** de gastar tokens executando.
+O operador quer **ver e aprovar o plano antes** de gastar tokens executando.
 
 **No primeiro turno de uma missão NOVA, antes de tocar em código**:
 

@@ -3,6 +3,8 @@
 Todas as mudanças notáveis deste projeto ficam aqui.
 
 > **A partir de v0.3.0** o changelog segue o **formato auditável** do harness do Coder (§6 do `harness/CONTRACT.md`): cada mudança registra *o que o operador pediu*, *por quê*, *o que foi feito*, *o que foi testado*, *os commits* e *como reverter*. É a trilha de auditoria da codificação — auditoria, reversibilidade e teste no mesmo lugar. Entradas anteriores seguem o [Keep a Changelog](https://keepachangelog.com/).
+>
+> **Régua de detalhe (changelog público).** Este repositório é público — então o changelog descreve a **mudança técnica**, nunca o **ambiente ou processo pessoal do operador**. Detalhe é bom, mas detalhe operacional-pessoal (caminhos absolutos, nomes próprios, topologia de deploy específica) é vazamento: descreva *o que o código faz*, não *onde/como o operador roda*. Nomes concretos de ambiente vivem na camada de usuário (D), fora do que é versionado.
 
 ## [0.7.0] — 2026-06-23 — Faxina de privacidade: split do deploy (camada D) + despersonalização
 
@@ -12,10 +14,10 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Foi feito (commit 1 — split + camada D):**
 - **Nova camada de usuário (D)** — `$KOBE_HOME/user-data/coder/deploy-profile.md` (gitignored, nunca público): a topologia de deploy do operador. `_build_system_prompt` (`coder_worker.py`) a lê como 4ª camada determinística, com **fallback gracioso** se ausente (usuário 2 sem perfil degrada como C-ausente, nunca crasha). Redundância intencional com o manual global: o Coder roda remoto sem garantia de receber A, então precisa do dado no próprio mundo dele. D ≠ A (A o motor jamais lê; D ele injeta de propósito).
-- **`CONTRACT.md` reescrito (§0, §9):** §0 ganha a camada D na tabela; §9 troca o diagrama concreto de 4 ambientes por **invariantes genéricos** (testa antes de publicar; passo público exige OK; git nunca rsync; marco por estágio; **todo repo de produção é tratado como potencialmente público**). A topologia concreta passa a vir de D/C. Termos `dev VPS`/`prod VPS` em §2.3/§2.4/§6.1/§10 viram papéis genéricos ("ambiente de desenvolvimento (o lab)" / "ambiente de homologação").
+- **`CONTRACT.md` reescrito (§0, §9):** §0 ganha a camada D na tabela; §9 troca o diagrama concreto de 4 ambientes por **invariantes genéricos** (testa antes de publicar; passo público exige OK; git nunca rsync; marco por estágio; **todo repo de produção é tratado como potencialmente público**). A topologia concreta passa a vir de D/C. Os termos de ambiente cravados em §2.3/§2.4/§6.1/§10 viram papéis genéricos (o lab de desenvolvimento / a homologação do operador).
 - **Template público** `harness/deploy-profile.example.md` (sem dados reais) — mostra a um usuário 2 como descrever a própria topologia.
 
-**Foi feito (commit 2 — despersonalização):** ver bullets adicionais abaixo nesta mesma versão (README/baselines/`remote-system.md` sem "Felipe"/"Hal"/ambiente; CHANGELOG higienizado; teste de portabilidade grep-guard).
+**Foi feito (commit 2 — despersonalização):** README, baselines e `remote-system.md` reescritos sem o nome do operador, sem o nome do agente e sem termos de ambiente pessoal; entradas antigas do CHANGELOG higienizadas (ambiente → papéis genéricos); **régua de detalhe público** registrada no topo deste arquivo; teste de portabilidade `tests/portability_guard.sh` que faz grep do tree e falha se um termo pessoal reaparecer (regressão permanente contra re-vazamento).
 
 **Testes (ambiente de desenvolvimento):** `py_compile` + suíte funcional de `_build_system_prompt` cobrindo camada D **presente** (header + conteúdo do perfil injetados) e **ausente** (nota graciosa, sem crash), e harness B íntegro no prompt montado. Todos passaram.
 
@@ -32,9 +34,9 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 **Foi feito:**
 - `coder_worker.py::_effort_flags` — quando `state.effort == "max"`, o `claude -p` (start E resume) nasce com `--effort max`. Override de modelo **só** se `KOBE_CODER_EFFORT_MAX_MODEL` estiver setado (default OFF — a escolha Fable/Max é decisão parqueada do operador, §14); por padrão sobe só o esforço, sem trocar o modelo.
 - Prompt do Procedimento 2 enriquecido: anuncia que o processo nasceu em `--effort max` e manda rodar os agentes de crivo **também em esforço elevado** (profundidade tanto na orquestração quanto em cada lente).
-- **Trava anti-gatilho-fantasma intacta:** `effort=max` só é setado via `--effort-max`, que o Hal só passa por comando inequívoco (mencionar/perguntar "ultracode" não aciona). O `state.effort` vive no state protegido — a sessão não auto-escala.
+- **Trava anti-gatilho-fantasma intacta:** `effort=max` só é setado via `--effort-max`, que o agente principal só passa por comando inequívoco (mencionar/perguntar "ultracode" não aciona). O `state.effort` vive no state protegido — a sessão não auto-escala.
 
-**Testes (dev VPS):** `_effort_flags` (standard→sem flag; max→`--effort max`; model só com env); cmd montado inclui/omite o flag certo (start e resume pelo mesmo caminho); prompt P2 anuncia boot em max + crivo elevado; **integração real**: `claude -p --effort max` + `--settings` do guard coexistindo — sessão sobe em max esforço E a deny-list segue bloqueando (`git reset --hard` negado). Regressão completa (guard ~70 casos + worktree) verde.
+**Testes (ambiente de desenvolvimento):** `_effort_flags` (standard→sem flag; max→`--effort max`; model só com env); cmd montado inclui/omite o flag certo (start e resume pelo mesmo caminho); prompt P2 anuncia boot em max + crivo elevado; **integração real**: `claude -p --effort max` + `--settings` do guard coexistindo — sessão sobe em max esforço E a deny-list segue bloqueando (`git reset --hard` negado). Regressão completa (guard ~70 casos + worktree) verde.
 
 **Commits:** v0.6.1 (ver `git log`). **Commit local — NÃO publicado** (repo dev/prod e restart aguardam OK explícito do operador, em passo único).
 
@@ -49,10 +51,10 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 **Foi feito:**
 - **Rito de quatro etapas, por procedimento, injetado no prompt** (`coder_worker.py`): a sessão recebe uma seção "PROCEDIMENTO DESTA SESSÃO" que diz se está no **Procedimento 1** (default — rito inline, "não escale por conta própria") ou no **Procedimento 2** (esforço máximo — rodar Advogado do Diabo / Revisão multi-lente / Testes em **agentes separados**, via a ferramenta de subagente, pra matar o viés de autoconfirmação).
 - **Caminho de comando pro esforço máximo** (§4): flag `--effort-max` no `start`/`resume` → estado `effort: "max"` (default `"standard"`). Nunca por auto-escalação — o estado fica no state protegido, fora do alcance da sessão.
-- **Reconhecimento no Hal** (`coder.md`): o agente passa `--effort-max` só quando o operador pede de forma **inequívoca**, com a trava anti-gatilho-fantasma (§4.2: mencionar/perguntar/projetar "ultracode" ≠ comando; na dúvida, Procedimento 1).
+- **Reconhecimento no agente principal** (`coder.md`): o agente passa `--effort-max` só quando o operador pede de forma **inequívoca**, com a trava anti-gatilho-fantasma (§4.2: mencionar/perguntar/projetar "ultracode" ≠ comando; na dúvida, Procedimento 1).
 - O conteúdo conceitual do rito e dos dois procedimentos já estava no `CONTRACT.md` (§2-§4) desde a Fase 0 — estas fases **operacionalizam** por sessão (a nota de procedimento + o reconhecimento do comando).
 
-**Testes (dev VPS):** assembly do prompt para `standard` e `max` (P1 traz "não escale", P2 traz "agentes separados"); retrocompat (sessão sem `effort` → standard); regressão completa do guard. Todos passaram. Self-review: a sessão self-escalar é impossível (effort vem do dispatch, state protegido); o conteúdo do rito é LLM por design (§12).
+**Testes (ambiente de desenvolvimento):** assembly do prompt para `standard` e `max` (P1 traz "não escale", P2 traz "agentes separados"); retrocompat (sessão sem `effort` → standard); regressão completa do guard. Todos passaram. Self-review: a sessão self-escalar é impossível (effort vem do dispatch, state protegido); o conteúdo do rito é LLM por design (§12).
 
 **Commits:** v0.6.0 (ver `git log`).
 
@@ -66,11 +68,11 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Foi feito:**
 - **Gate do passo público de deploy** (`guard.py`, `KOBE_CODER_GATE_DEPLOY` default on): `git push` pro remote público (declarado em `KOBE_CODER_PUBLIC_REMOTES`, ex.: `prod`) é **negado** até o operador aprovar (§10). Liberado por `--approve-deploy` no resume (estado `deploy_approved`). Default sem config = gate inativo (zero falso-positivo). Os passos intermediários (push pro repo dev) rodam normal.
-- **Agent def** atualizado: o Hal passa `--approve-deploy` quando o operador autoriza publicar.
+- **Agent def** atualizado: o agente principal passa `--approve-deploy` quando o operador autoriza publicar.
 - **CONTRACT §8** atualizado: gate de deploy marcado ✅ Fase 2; marcos de deploy e quarentena de vocabulário marcados como obrigação (LLM).
-- **Já estava no harness desde v0.2.0/Fase 0-1** (a Fase 2 formaliza, não reconstrói): brief automático (plano em anexo antes de codar), checklist vivo persistido, dois tipos de marco via `kobe-notify` (§10.1), mecânica de testes em dev VPS (rito §2 + gate de changelog exigindo o campo Testes), modelo de deploy 4-ambientes via git (§9), quarentena de vocabulário (§5.3).
+- **Já estava no harness desde v0.2.0/Fase 0-1** (a Fase 2 formaliza, não reconstrói): brief automático (plano em anexo antes de codar), checklist vivo persistido, dois tipos de marco via `kobe-notify` (§10.1), mecânica de testes no ambiente de desenvolvimento (rito §2 + gate de changelog exigindo o campo Testes), modelo de deploy 4-ambientes via git (§9), quarentena de vocabulário (§5.3).
 
-**Testes (dev VPS):** suíte do deploy gate (push público sem/com aprovação, remote não-público, sem config → inativo) + regressão completa da suíte do guard (~70 casos) — todos passaram. Self-review (advogado do diabo): push por URL em vez de nome de remote contornaria o gate — limitação conhecida do modelo name-based, aceitável (sessões empurram por nome de remote).
+**Testes (ambiente de desenvolvimento):** suíte do deploy gate (push público sem/com aprovação, remote não-público, sem config → inativo) + regressão completa da suíte do guard (~70 casos) — todos passaram. Self-review (advogado do diabo): push por URL em vez de nome de remote contornaria o gate — limitação conhecida do modelo name-based, aceitável (sessões empurram por nome de remote).
 
 **Commits:** v0.5.0 (ver `git log`).
 
@@ -85,10 +87,10 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 **Foi feito:**
 - **Hook `guard.py` (PreToolUse)** — enforcement real: verificado empiricamente que um hook que devolve `permissionDecision:deny` bloqueia a ferramenta **mesmo sob bypassPermissions**. Gates: **deny-list** de destrutivos (rm recursivo em qualquer forma, force/mirror/delete push, reset --hard, clean, restore/checkout ., DROP/TRUNCATE/DELETE, publish, systemctl/service/pkg, chmod -R 777, indireção base64|sh/eval/pipe-pra-interpretador); **gate de changelog** (commit exige arquivo de changelog no staged; escape `[wip]`); **gate PARA-e-espera-OK** (edição de código de produção negada até aprovação do plano; `.local/` livre); **HALT** (conflito de regras → nega ação mutante, exceto comunicação).
 - **Wiring no worker** via `--settings` gerado por sessão. O path do state vai no **argv do hook**, não no env da sessão — a sessão não conhece o path do próprio cadeado e não pode reescrever `plan_approved`/`halted` por Bash. Settings efêmero em subdir `.settings/` (não colide com a busca de sessão).
-- **Estado novo** (`run_remote.py`): `plan_approved`, `halted`, `halt_reason`, campos de worktree. Comandos: `--approve-plan` (start/resume), `--clear-halt` (resume), `halt`, `merge`. Agent def atualizado: o Hal passa `--approve-plan` ao detectar a aprovação do operador (detecção = LLM, liberação do gate = código).
+- **Estado novo** (`run_remote.py`): `plan_approved`, `halted`, `halt_reason`, campos de worktree. Comandos: `--approve-plan` (start/resume), `--clear-halt` (resume), `halt`, `merge`. Agent def atualizado: o agente principal passa `--approve-plan` ao detectar a aprovação do operador (detecção = LLM, liberação do gate = código).
 - **Isolamento por worktree + lock de merge** (`KOBE_CODER_WORKTREE`, **default OFF** por reversibilidade): cada sessão roda numa `git worktree` própria; merge de volta serializado por `flock`, conservador — registra branch+sha de origem, recusa detached HEAD / branch errada / árvore suja / worktree suja, `branch -d` (não `-D`), grava o sha pré-merge como caminho de volta (§5.1). Nunca força, nunca auto-resolve conflito.
 
-**Testes (dev VPS):** suíte de ~70 casos do guard cobrindo cada bypass que a revisão adversarial encontrou (rm flags separadas/long, redirect no carve-out, DELETE com WHERE, push mirror/delete/refspec, systemctl kill, base64|sh, etc.) + proteção do state + plan gate + HALT comm-only + fail-closed; suíte de worktree (setup/merge/cleanup/dirty-safety/non-git); **2 testes de integração com `claude -p` real** confirmando deny-list e plan-gate bloqueando sob bypassPermissions com o settings real. Todos passaram. **Revisão adversarial de 4 agentes** (bypass de deny-list, fluxo dos gates, segurança da worktree, correção do código) achou 5 blockers reais (state auto-gravável, colisão de glob do settings, merge cego, force-remove, HALT mudo) + majors — **todos corrigidos e re-testados** antes de fechar. Resíduo honesto: indireção arbitrária (travessia cega do FS pra achar o state) não é 100% pegável por regex — mitigado (vetores diretos fechados, fail-closed em corrupção), e é em si violação de contrato tratável como HALT.
+**Testes (ambiente de desenvolvimento):** suíte de ~70 casos do guard cobrindo cada bypass que a revisão adversarial encontrou (rm flags separadas/long, redirect no carve-out, DELETE com WHERE, push mirror/delete/refspec, systemctl kill, base64|sh, etc.) + proteção do state + plan gate + HALT comm-only + fail-closed; suíte de worktree (setup/merge/cleanup/dirty-safety/non-git); **2 testes de integração com `claude -p` real** confirmando deny-list e plan-gate bloqueando sob bypassPermissions com o settings real. Todos passaram. **Revisão adversarial de 4 agentes** (bypass de deny-list, fluxo dos gates, segurança da worktree, correção do código) achou 5 blockers reais (state auto-gravável, colisão de glob do settings, merge cego, force-remove, HALT mudo) + majors — **todos corrigidos e re-testados** antes de fechar. Resíduo honesto: indireção arbitrária (travessia cega do FS pra achar o state) não é 100% pegável por regex — mitigado (vetores diretos fechados, fail-closed em corrupção), e é em si violação de contrato tratável como HALT.
 
 **Commits:** v0.4.0 (ver `git log`).
 
@@ -108,7 +110,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 - **Robustez:** fallback gracioso quando `remote-system.md` ou `CONTRACT.md` faltam (base mínima de emergência em vez de crash); `PYTHONUTF8=1` no spawn do worker para o prompt não-ASCII (~31KB) não estourar em locale não-UTF-8.
 - README atualizado (seção "Harness do Coder"); manifest bump para 0.3.0.
 
-**Testes (dev VPS):** `py_compile` + import smoke dos dois scripts; suíte funcional de `_build_system_prompt` cobrindo C-presente, C-ausente, harness-ausente e base-ausente (degrada sem crashar); verificação de que o prompt montado não contém nenhuma instrução de dependência do manual pessoal (A) e que `~/.claude` só aparece na nota documental de resíduo; `_build_prompt` sem o parâmetro morto. Todos passaram. Revisão multi-lente independente (4 agentes: fidelidade ao plano, portabilidade, correção do código, coerência código-vs-LLM) + síntese — 5 majors e vários minors aplicados antes de fechar. Validação final de produto = operador, em uso real.
+**Testes (ambiente de desenvolvimento):** `py_compile` + import smoke dos dois scripts; suíte funcional de `_build_system_prompt` cobrindo C-presente, C-ausente, harness-ausente e base-ausente (degrada sem crashar); verificação de que o prompt montado não contém nenhuma instrução de dependência do manual pessoal (A) e que `~/.claude` só aparece na nota documental de resíduo; `_build_prompt` sem o parâmetro morto. Todos passaram. Revisão multi-lente independente (4 agentes: fidelidade ao plano, portabilidade, correção do código, coerência código-vs-LLM) + síntese — 5 majors e vários minors aplicados antes de fechar. Validação final de produto = operador, em uso real.
 
 **Commits:** v0.3.0 (ver `git log`).
 

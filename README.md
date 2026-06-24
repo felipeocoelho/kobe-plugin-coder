@@ -107,7 +107,7 @@ Pasta: `$KOBE_HOME/user-data/claude-presence/<pid>.json`. Cada instância Claude
 ```json
 {
   "pid": 12345,
-  "cwd": "/home/felipe/projetos/foo",
+  "cwd": "/home/<user>/projetos/foo",
   "session_id": "uuid-ou-null",
   "source": "telegram-coder",
   "topic_key": "general",
@@ -162,7 +162,7 @@ O motor monta o prompt em três camadas, de forma determinística (`coder_worker
 2. **Harness do Coder (B)** (`harness/CONTRACT.md`) — as regras do jogo, injetadas porque NÃO vêm da cwd.
 3. **Contrato do projeto (C)** — o `CLAUDE.md` do projeto-alvo, carregado nativamente pelo Claude Code por a sessão rodar na cwd do projeto. O motor anexa uma nota determinística sobre a presença/ausência de C.
 
-**O manual pessoal do operador (A) nunca é carregado pelo motor.** O harness é portável: uma sessão que tem só B + C tem tudo que precisa para rodar limpo — inclusive para um operador que não seja o Felipe. Convenções que não estão em B nem em C são preferência do operador, e a sessão **pergunta** em vez de chutar a partir de um ambiente pessoal específico.
+**O manual pessoal do operador (A) nunca é carregado pelo motor.** O harness é portável: uma sessão que tem só B + C tem tudo que precisa para rodar limpo — inclusive para um operador que não seja o original. Convenções que não estão em B nem em C são preferência do operador, e a sessão **pergunta** em vez de chutar a partir de um ambiente pessoal específico.
 
 ### Gates determinísticos (v0.4.0+)
 
