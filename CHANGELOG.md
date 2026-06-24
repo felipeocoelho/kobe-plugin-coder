@@ -10,6 +10,22 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > Em progresso. Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
 
+### BUG 0 — auto-report determinístico quando o gate de plano trava (mata o deadlock silencioso)
+
+**Operador pediu:** uma sessão aprovada que não destrava é um deadlock; e descobrir isso não pode exigir garimpo — a sessão tem que avisar sozinha quando trava.
+
+**Por quê:** o gate PARA-e-espera (§10) bloqueia edição de código de produção até `plan_approved`. A flag só é setada pelo **canal de controle** (a retomada externa com `--approve-plan`). Aprovação digitada **direto na sala** (interface remote-control, navegável) NÃO tem caminho até a flag — então o operador podia aprovar e a sessão seguir bloqueada, **em silêncio**, até alguém investigar. Isso é correto por design: a sessão **não pode** setar a própria flag — há duas camadas independentes impedindo auto-aprovação (o hook `guard` + o classificador do auto-mode). A aprovação tem que nascer **fora** da sessão. O que faltava era o **sinal** de que ela travou.
+
+**Foi feito:**
+- O hook `guard`, no exato `deny` do gate de plano, emite um **auto-report** ao operador (`kobe-notify`) explicando que a sessão travou porque a aprovação não chegou à flag, e guiando ao canal de controle correto. Determinístico (código — não depende do LLM lembrar de avisar).
+- Blindado pra **nunca** quebrar o `deny`: desligável por env (`KOBE_CODER_GATE_NOTIFY`, default on — desligado nos testes pra não disparar mensagem real), silencioso se faltam envs/bin, e com **throttle** (1 aviso por janela, marcador em `/tmp` fora do control-plane) pra não floodar quando a sessão tenta editar várias vezes antes de encerrar o turno.
+
+**Testes (ambiente de desenvolvimento):** suíte completa do guard (regressão — todos verdes) + casos novos (deny intacto com notify on/off; `.local` livre mesmo com notify on) + teste de caminho-feliz com `kobe-notify` falso: dispara, cita o id curto da sessão, guia pro canal de controle, e o throttle segura o 2º disparo.
+
+**Commits:** ver `git log`. **NÃO publicado.**
+
+**Reversão:** aditiva — `git revert` do commit. Sem auto-report, volta ao `deny` silencioso anterior. Nada fora do git tocado.
+
 ### BUG 1 — dispatch SEMPRE nasce sala (mata o fallback silencioso)
 
 **Operador pediu:** disparo de sessão de código tem que SEMPRE abrir uma sala navegável com remote control — não existe sessão rodando invisível. Matar o ramo que rodava sem sala calado.

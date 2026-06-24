@@ -47,6 +47,8 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 
@@ -382,6 +384,54 @@ def _is_local_or_plan(path: str) -> bool:
         return False
 
 
+def _notify_operator_blocked(state: dict | None) -> None:
+    """Auto-report determinístico: avisa o operador quando o gate de plano TRAVA
+    a sessão (a aprovação não chegou à flag `plan_approved`). É a rede contra o
+    deadlock silencioso do incidente: o operador aprovou pela sala/Desktop — que
+    NÃO tem caminho até a flag (só o canal de controle/Telegram seta `--approve-plan`)
+    — e a sessão ficava bloqueada sem ninguém saber.
+
+    Determinístico (código, não confiança no LLM): roda no próprio caminho de
+    `deny` do gate de plano. Best-effort e blindado — NUNCA quebra o `deny`:
+    - desligável por env (`KOBE_CODER_GATE_NOTIFY`, default on) — usado nos testes
+      pra não disparar Telegram real;
+    - silencioso se faltam envs (`KOBE_HOME`/token/chat) ou o bin `kobe-notify`;
+    - throttle por marcador em /tmp (1 aviso por janela), pra não floodar quando a
+      sessão tenta editar várias vezes antes de encerrar o turno.
+    """
+    if not _env_on("KOBE_CODER_GATE_NOTIFY"):
+        return
+    kobe_home = os.environ.get("KOBE_HOME", "").strip()
+    token = os.environ.get("KOBE_TELEGRAM_BOT_TOKEN")
+    chat = os.environ.get("KOBE_CHAT_ID")
+    if not (kobe_home and token and chat):
+        return
+    notify = Path(kobe_home) / "bot" / "bin" / "kobe-notify"
+    if not notify.is_file():
+        return
+    short = (state or {}).get("short_id") or "?"
+    # Throttle: 1 aviso por janela (default 600s). Marcador em /tmp pra NÃO poluir
+    # o control-plane (coder-sessions) nem colidir com o glob `*.json` das sessões.
+    try:
+        marker = Path(tempfile.gettempdir()) / f".coder_plan_block_{short}"
+        if marker.is_file() and (time.time() - marker.stat().st_mtime) < 600:
+            return
+        marker.write_text(str(time.time()), encoding="utf-8")
+    except Exception:  # noqa: BLE001 — throttle é nice-to-have; na dúvida, avisa
+        pass
+    msg = (
+        f"🟡 [coder] sessão `{short}` BLOQUEADA no gate de plano: a aprovação não "
+        f"chegou à flag. Se você aprovou pela sala/Desktop, ela não destrava — o "
+        f"Desktop não tem caminho até a flag. Aprove pelo canal de controle "
+        f"(Telegram): peça ao agente principal pra retomar a sessão coder aprovando "
+        f"o plano. (Detalhe: §10 do contrato — PARA-e-espera-OK.)"
+    )
+    try:
+        subprocess.run([str(notify), msg], timeout=15, capture_output=True)
+    except Exception:  # noqa: BLE001 — auto-report é best-effort, nunca trava o deny
+        pass
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--state", default=None, help="path do state.json da sessão (fora do env da sessão)")
@@ -441,6 +491,10 @@ def main() -> int:
         if "plan_approved" in state:  # sessão antiga sem o campo: não-gated
             path = _edited_path(tool_name, tool_input)
             if path is not None and not _is_local_or_plan(path):
+                # Auto-report determinístico ANTES do deny: mata o deadlock
+                # silencioso (operador aprovou pela sala/Desktop, que não chega
+                # na flag, e ninguém sabia que a sessão estava travada).
+                _notify_operator_blocked(state)
                 _deny(
                     "[guard:plan] Edição de código de produção bloqueada: o plano "
                     "ainda não foi aprovado pelo operador (§10 — PARA e espera OK). "
