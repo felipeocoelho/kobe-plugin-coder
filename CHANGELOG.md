@@ -4,6 +4,25 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > **A partir de v0.3.0** o changelog segue o **formato auditável** do harness do Coder (§6 do `harness/CONTRACT.md`): cada mudança registra *o que o operador pediu*, *por quê*, *o que foi feito*, *o que foi testado*, *os commits* e *como reverter*. É a trilha de auditoria da codificação — auditoria, reversibilidade e teste no mesmo lugar. Entradas anteriores seguem o [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.7.0] — 2026-06-23 — Faxina de privacidade: split do deploy (camada D) + despersonalização
+
+**Operador pediu:** o plugin é público e vazava o ambiente pessoal do operador pro GitHub — os termos do deploy dele cravados no contrato, caminhos absolutos, o nome do operador e o nome do agente. Tirar tudo isso do que é público, sem perder a função.
+
+**Por quê:** a infraestrutura de deploy (quantos ambientes, caminhos, estágios, ações entre estágios) **varia de operador** — não é constante de produto. Cravá-la no harness público (a) vaza dado pessoal e (b) presume que todo usuário tem a mesma topologia. O harness deve fixar só os **invariantes**; a topologia concreta é **dado de usuário**, que mora fora do repo público e é injetada no prompt da sessão.
+
+**Foi feito (commit 1 — split + camada D):**
+- **Nova camada de usuário (D)** — `$KOBE_HOME/user-data/coder/deploy-profile.md` (gitignored, nunca público): a topologia de deploy do operador. `_build_system_prompt` (`coder_worker.py`) a lê como 4ª camada determinística, com **fallback gracioso** se ausente (usuário 2 sem perfil degrada como C-ausente, nunca crasha). Redundância intencional com o manual global: o Coder roda remoto sem garantia de receber A, então precisa do dado no próprio mundo dele. D ≠ A (A o motor jamais lê; D ele injeta de propósito).
+- **`CONTRACT.md` reescrito (§0, §9):** §0 ganha a camada D na tabela; §9 troca o diagrama concreto de 4 ambientes por **invariantes genéricos** (testa antes de publicar; passo público exige OK; git nunca rsync; marco por estágio; **todo repo de produção é tratado como potencialmente público**). A topologia concreta passa a vir de D/C. Termos `dev VPS`/`prod VPS` em §2.3/§2.4/§6.1/§10 viram papéis genéricos ("ambiente de desenvolvimento (o lab)" / "ambiente de homologação").
+- **Template público** `harness/deploy-profile.example.md` (sem dados reais) — mostra a um usuário 2 como descrever a própria topologia.
+
+**Foi feito (commit 2 — despersonalização):** ver bullets adicionais abaixo nesta mesma versão (README/baselines/`remote-system.md` sem "Felipe"/"Hal"/ambiente; CHANGELOG higienizado; teste de portabilidade grep-guard).
+
+**Testes (ambiente de desenvolvimento):** `py_compile` + suíte funcional de `_build_system_prompt` cobrindo camada D **presente** (header + conteúdo do perfil injetados) e **ausente** (nota graciosa, sem crash), e harness B íntegro no prompt montado. Todos passaram.
+
+**Commits:** v0.7.0 (ver `git log`). **NÃO publicado** — aguarda OK do operador para o deploy (e para a reescrita de história, em passo dedicado).
+
+**Reversão:** aditiva. Rollback = `git revert` dos commits de v0.7.0. A camada D ausente degrada graciosamente; nada fora do git foi migrado (o `deploy-profile.md` real é gitignored e não versionado).
+
 ## [0.6.1] — 2026-06-22 — Fix: esforço máximo agora chega ao boot do `claude -p`
 
 **Operador pediu:** avaliar se o `--effort-max` do plugin, que hoje só troca o PROMPT (manda rodar o crivo em agentes separados), mas NÃO passa `--effort max` (nem override de modelo) pro `claude -p` disparado, é decisão de design ou furo — e, se furo, fechá-lo na mesma trilha estruturada, mantendo a trava anti-gatilho-fantasma.

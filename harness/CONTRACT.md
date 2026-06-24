@@ -6,7 +6,7 @@
 
 ---
 
-## 0. As três camadas de regras (e qual é a sua)
+## 0. As camadas de regras (e qual é a sua)
 
 As regras que governam uma sessão de codificação vêm de camadas com donos distintos:
 
@@ -15,8 +15,9 @@ As regras que governam uma sessão de codificação vêm de camadas com donos di
 | **A. Manual do operador** | a pessoa | o harness *pessoal* do operador — vale para tudo que ele faz, com ou sem Coder. **Você (motor do Coder) NÃO depende dele.** |
 | **B. Harness do Coder** | o produto Coder | **este documento.** Vale para toda sessão do Coder, para qualquer operador. Viaja com o produto. |
 | **C. Contrato do projeto** | o projeto-alvo | o `CLAUDE.md` do projeto onde você trabalha. Específico daquele projeto. |
+| **D. Camada de usuário do Coder** | o operador (mas **injetada pelo motor**) | dado de deploy específico do operador: topologia de ambientes, caminhos, estágios e ações entre estágios. Mora **fora do repo público** (`$KOBE_HOME/user-data/coder/deploy-profile.md`, gitignored), porque varia por operador e não pode ser publicada. Pode estar **ausente** (operador que não preencheu). |
 
-**Você opera sob B + C.** Nunca dependa da camada A: ela tem os caminhos, repos e preferências *de um operador específico*, e o Coder precisa rodar limpo para qualquer um. Se B e C bastam para a missão, é porque foram desenhados para bastar. (Detalhe de carregamento na §10.)
+**Você opera sob B + C (+ D, quando presente).** Nunca dependa da camada A: ela tem os caminhos, repos e preferências *de um operador específico*, e o Coder precisa rodar limpo para qualquer um. **D não é A:** A é o manual global que o motor *jamais* lê; D é dado de deploy que o motor injeta *de propósito* (redundância intencional com o manual global, porque o Coder roda remoto sem garantia de receber A). Se B + C (+ D) bastam para a missão, é porque foram desenhados para bastar. (Detalhe de carregamento na §10.)
 
 ---
 
@@ -70,13 +71,13 @@ As etapas podem **rodar em loop** até fechar (um teste que falha volta ao Plane
 
 ### 2.3 Onde os testes acontecem — e onde não
 
-A etapa de Testes é sempre **em dev VPS** (o lab). Você testa o que você mesmo pode testar (automatizável em dev). A validação final de produto é do **operador**, no uso real em prod VPS. Você **nunca** "testa em produção" no lugar da homologação dele. A lógica do deploy (§9) garante: o que chega à prod VPS *já passou* pelos testes em dev VPS.
+A etapa de Testes é sempre **no ambiente de desenvolvimento** (o lab). Você testa o que você mesmo pode testar (automatizável). A validação final de produto é do **operador**, no uso real no ambiente de homologação dele. Você **nunca** "testa em produção" no lugar da homologação dele. A lógica do deploy (§9) garante: o que chega à homologação *já passou* pelos testes no lab.
 
-Nem todo código tem teste automatizável barato (ex.: ajuste cosmético que só se valida no olho). A etapa é **"plano de testes e testar, na medida do possível"**, não "cobertura total obrigatória". Onde não há o que automatizar, o "teste" é o **runbook** que vai para a validação do operador em prod VPS — e isso fica explícito no changelog.
+Nem todo código tem teste automatizável barato (ex.: ajuste cosmético que só se valida no olho). A etapa é **"plano de testes e testar, na medida do possível"**, não "cobertura total obrigatória". Onde não há o que automatizar, o "teste" é o **runbook** que vai para a validação do operador no ambiente de homologação — e isso fica explícito no changelog.
 
 ### 2.4 A trava de teste (gate de Fase 1 — por ora, obrigação dura sua)
 
-**Nenhum trabalho de codar se dá por concluído sem o plano de testes ter sido desenvolvido e executado, na medida do possível, em dev VPS — e o resultado registrado no campo `Testes:` do changelog** (§6). O que se exige é que a etapa *aconteça* (você pondere o que dá para testar, teste, e registre); a *extensão* do teste é seu julgamento, proporcional ao risco.
+**Nenhum trabalho de codar se dá por concluído sem o plano de testes ter sido desenvolvido e executado, na medida do possível, no ambiente de desenvolvimento — e o resultado registrado no campo `Testes:` do changelog** (§6). O que se exige é que a etapa *aconteça* (você pondere o que dá para testar, teste, e registre); a *extensão* do teste é seu julgamento, proporcional ao risco.
 
 > **Estado de implementação (honestidade, ver §8):** diferente do gate de changelog, este **não é trava de código** — "testou o suficiente?" é indecidível por um hook. Permanece **obrigação dura deste contrato que você cumpre**, reforçada de lado: o gate de changelog exige o campo `Testes:` preenchido, então fechar trabalho sem relatar teste fica visível na auditoria.
 
@@ -159,7 +160,7 @@ Quando o operador pede para codar algo, o changelog tem que registrar **a histó
 **Foi feito:**
 - <ação concreta 1>
 - <ação concreta 2>
-**Testes:** <o que foi testado em dev VPS e o resultado>
+**Testes:** <o que foi testado no ambiente de desenvolvimento e o resultado>
 **Commits:** <hashes>
 **Reversão:** <como desfazer — commit/branch/backup>
 ```
@@ -226,26 +227,26 @@ Cada passo do ritual é um checkpoint que o código *deve forçar* (não dá par
 > - Um comando destrutivo (rm -rf, force push, DROP, etc.) é **negado pelo hook** — você recebe a recusa, não a execução. Pare e peça OK ao operador.
 > - Um `git commit` sem arquivo de changelog no staged diff é **negado**. Atualize o CHANGELOG e dê `git add` antes. Para um commit-rede-de-segurança intermediário, inclua **`[wip]`** na mensagem (passa sem changelog, fica auditável).
 > - Antes da aprovação do plano, **editar código de produção é negado** (rascunhos em `.local/` são livres). Escreva o plano, anexe, e espere o OK.
-> - Ao detectar um conflito de regras irreconciliável (§7.1), **nomeie o conflito num `kobe-notify` e encerre o turno** aguardando o operador arbitrar. Se o operador (ou o Hal) decidir congelar a sessão, ela entra em **HALT** e toda ação mutante é negada até a arbitragem — mas você ainda pode usar `kobe-notify` pra explicar.
+> - Ao detectar um conflito de regras irreconciliável (§7.1), **nomeie o conflito num `kobe-notify` e encerre o turno** aguardando o operador arbitrar. Se o operador (ou o agente principal) decidir congelar a sessão, ela entra em **HALT** e toda ação mutante é negada até a arbitragem — mas você ainda pode usar `kobe-notify` pra explicar.
 > - O **push pro remote público** (passo final de deploy, §10) é **negado** até o operador aprovar, quando o projeto declara um remote público (`KOBE_CODER_PUBLIC_REMOTES`). Os passos intermediários (push pro repo dev, etc.) rodam normal; ao chegar no público, **pare, mostre o que vai ser publicado, e aguarde o OK**.
 
 ---
 
 ## 9. Deploy
 
-Você não inventa como faz deploy — segue o **contrato de deploy**, de duas fontes aditivas:
+Você não inventa como faz deploy. O harness (B) fixa só os **invariantes**, válidos para qualquer operador; a **topologia concreta** vem da camada de usuário (D) e/ou do contrato do projeto (C) — porque ela varia de operador para operador.
 
-- **Default por instalação** (camada B). Modelo de **quatro ambientes**, **sempre via git** (nunca rsync — §1.4):
+**Invariantes (camada B — sempre valem):**
 
-  ```
-  dev VPS  ──git push──▶  repo dev  ──git pull──▶  prod VPS  ──git push──▶  repo prod (público)
-  ```
+1. **Testa-se antes de publicar.** Os Testes do rito (§2) acontecem no ambiente de desenvolvimento (o lab), antes de qualquer subida. O que chega à homologação/produção já passou por eles.
+2. **O passo que toca usuário público EXIGE OK** (§4). Publicar no que é público é o último degrau e nunca é automático.
+3. **Deploy é git, nunca rsync** (§1.4). O git versionado da produção é o rollback; rsync atropela isso.
+4. **Cada cruzamento de estágio dispara um marco de deploy** (§10.1).
+5. **Todo repositório de produção é tratado como POTENCIALMENTE PÚBLICO.** Mesmo um repo hoje privado pode abrir depois — então a higiene vale **já**: **não embuta no que é versionado** o nome do operador, caminhos absolutos do ambiente dele, nem a topologia de deploy pessoal. Isso é dado de usuário (camada D) ou do projeto (C), nunca do harness público.
 
-  A produção **puxa a versão** do repo dev por `git pull` (assim nunca perde versionamento). O **último passo — publicar no repo prod, público — EXIGE OK** (§4). Cada cruzamento de degrau dispara um **marco de deploy** (§10.1). Os **Testes** do rito (§2) acontecem em **dev VPS**, antes de qualquer subida — o que chega à prod VPS já passou por eles.
+**Topologia concreta (camadas D / C — varia por operador):** quantos ambientes existem, seus nomes, os caminhos, a ordem dos `git push`/`git pull` entre eles e as ações entre estágios (migrations, restart, validação). Vem da **camada de usuário do Coder (D)** (`$KOBE_HOME/user-data/coder/deploy-profile.md`) e/ou do `CLAUDE.md` do projeto (C). **Se D e C estiverem ausentes**, você não conhece a topologia — então **pergunte ao operador** antes de qualquer passo de deploy, em vez de assumir um modelo.
 
-- **Específico do projeto** (contrato C). Se o projeto-alvo faz deploy de outro jeito, isso vive no `CLAUDE.md` daquele projeto.
-
-Se o default e o do projeto se contradisserem → conflito → §5.1 (para e avisa). Se o projeto **declarar** seu deploy próprio como exceção → §5.2 (respeita, registrado).
+Se a topologia de D e a de C se contradisserem → conflito → §5.1 (para e avisa). Se o projeto **declarar** seu deploy próprio como exceção → §5.2 (respeita, registrado).
 
 ---
 
@@ -257,14 +258,14 @@ O ciclo é **fixo**. Você não improvisa a ordem:
 2. **Produz o plano** (já passado pelo Planejamento + Advogado do Diabo, §2) e entrega como anexo (`kobe-attach`).
 3. **PARA e espera OK.** Não escreve uma linha de código de produção antes do aceite explícito. *(✅ Trava de código desde a Fase 1 — o gate `plan` no hook `guard` nega Edit/Write de código de produção até o operador aprovar; rascunhos em `.local/` são livres. Ver §8.)*
 4. **Executa**, marcando um **checklist vivo** conforme avança.
-5. **Revisa e testa** (§2, etapas 3 e 4) — crivo multi-lente + plano de testes executado em dev VPS.
+5. **Revisa e testa** (§2, etapas 3 e 4) — crivo multi-lente + plano de testes executado no ambiente de desenvolvimento.
 6. **Notifica a cada marco** via `kobe-notify`.
-7. **Registra no changelog** (§6, incluindo o que foi testado) e **entrega** — código + testes rodados em dev VPS **ou** runbook de teste em anexo para a validação do operador em prod VPS.
+7. **Registra no changelog** (§6, incluindo o que foi testado) e **entrega** — código + testes rodados no ambiente de desenvolvimento **ou** runbook de teste em anexo para a validação do operador no ambiente de homologação.
 
 ### 10.1 Dois tipos de marco, dois avisos
 
-- **Marcos de codificação** — cada tarefa relevante de implementação concluída (incluindo o resultado dos testes). Ex.: *"✅ Handler de lock reescrito e testado em dev VPS — partindo pro deploy."*
-- **Marcos de deploy** — cada vez que o trabalho **cruza um estágio do fluxo** (§9). Ex.: *"📦 Subi pro repo dev."* · *"📥 Puxei na prod VPS — validando."* · *"🚀 Publiquei no repo prod."*
+- **Marcos de codificação** — cada tarefa relevante de implementação concluída (incluindo o resultado dos testes). Ex.: *"✅ Handler de lock reescrito e testado no ambiente de desenvolvimento — partindo pro deploy."*
+- **Marcos de deploy** — cada vez que o trabalho **cruza um estágio do fluxo** (§9). Ex. (os nomes concretos vêm da camada D/C): *"📦 Subi pro repositório de trabalho."* · *"📥 Puxei na homologação — validando."* · *"🚀 Publiquei no repositório público."*
 
 ### 10.2 Onde o contrato é carregado (B + C, nunca A)
 

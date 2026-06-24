@@ -173,8 +173,16 @@ def _build_system_prompt(plugin_root: Path, cwd: Path, effort: str = "standard")
     disso, anexamos uma **nota determinística** sobre a presença/ausência de C,
     pra sessão saber o status sem adivinhar.
 
+    A **camada de usuário do Coder (D)** é o `deploy-profile.md` em
+    `$KOBE_HOME/user-data/coder/` (gitignored, fora do repo público): a topologia
+    de deploy do operador, que VARIA por operador e não pode subir pro GitHub.
+    É injetada aqui (com fallback gracioso se ausente) — é o complemento concreto
+    dos invariantes de deploy que o harness (B) fixa de forma genérica.
+
     O **manual pessoal do operador (A)** NUNCA é carregado aqui — o harness é
-    portável e não pode depender do ambiente de um operador específico.
+    portável e não pode depender do ambiente de um operador específico. D ≠ A:
+    A é o manual global que o motor jamais lê; D é dado de deploy que o motor
+    injeta de propósito (redundância intencional com o CLAUDE.md global).
     """
     parts: list[str] = []
 
@@ -246,6 +254,47 @@ def _build_system_prompt(plugin_root: Path, cwd: Path, effort: str = "standard")
     parts.append(
         "\n\n---\n\n# === CONTRATO DO PROJETO (C) ===\n\n" + c_note
     )
+
+    # Camada de usuário do Coder (D) — dado específico do operador que o MOTOR
+    # injeta (≠ camada A, que nunca é carregada). Mora FORA do repo público do
+    # plugin, em `$KOBE_HOME/user-data/coder/deploy-profile.md` (gitignored): a
+    # topologia de deploy do operador (ambientes, caminhos, estágios e as ações
+    # entre estágios) VARIA por operador e NÃO pode subir pro GitHub. Por isso
+    # não mora no CONTRACT.md (público). A redundância com o CLAUDE.md global é
+    # intencional: o Coder roda como sessão remota sem garantia de receber A,
+    # então precisa do dado no próprio mundo dele. Ausente → nota graciosa
+    # (usuário 2 sem perfil), degradando como o caso C-ausente — nunca crasha.
+    kobe_home_raw = os.environ.get("KOBE_HOME", "").strip()
+    profile_text: str | None = None
+    if kobe_home_raw:
+        profile_file = (
+            Path(kobe_home_raw).expanduser()
+            / "user-data" / "coder" / "deploy-profile.md"
+        )
+        if profile_file.is_file():
+            try:
+                profile_text = profile_file.read_text(encoding="utf-8").strip() or None
+            except OSError:
+                profile_text = None
+    if profile_text:
+        parts.append(
+            "\n\n---\n\n# === CAMADA DE USUÁRIO DO CODER (D) ===\n\n"
+            "Dado específico do operador desta instalação — a topologia de deploy "
+            "(ambientes, caminhos, estágios e o que fazer entre eles). Some ao "
+            "harness pelo modelo aditivo (§5); em conflito com B/C, §5.1 (para e "
+            "avisa). É a fonte concreta do deploy — o harness só fixa os "
+            "invariantes (§9).\n\n" + profile_text
+        )
+    else:
+        parts.append(
+            "\n\n---\n\n# === CAMADA DE USUÁRIO DO CODER (D) — AUSENTE ===\n\n"
+            "Não há perfil de deploy do operador em "
+            "`$KOBE_HOME/user-data/coder/deploy-profile.md`. A topologia concreta "
+            "de deploy (quantos ambientes, caminhos, estágios, ações entre eles) "
+            "não está definida aqui — ela vem do contrato do projeto (C) ou, na "
+            "falta, **pergunte ao operador** antes de qualquer passo de deploy. "
+            "Não invente caminhos nem ambientes."
+        )
 
     # Procedimento de esforço desta sessão (§3/§4 do contrato).
     if effort == "max":
