@@ -997,11 +997,31 @@ def main() -> int:
     signal.signal(signal.SIGTERM, _on_term)
 
     try:
-        # Modo sala (--remote-control, visível) é O MODELO do Coder (cmd_start grava
-        # sala_mode=True). run_claude (claude -p) fica como código dormente/fallback
-        # interno, não como escolha do operador.
-        runner = run_sala if state.get("sala_mode") else run_claude
-        return runner(state_path=state_path, mode=args.mode, kobe_home=kobe_home)
+        # BUG 1 (incidente 2026-06-23, sessão 1dfc1ed6): dispatch de Coder é
+        # SEMPRE sala tmux com remote control — requisito inegociável do operador.
+        # NÃO existe sessão de Coder sem sala. O antigo ternário
+        # `run_sala if sala_mode else run_claude` era um FALLBACK SILENCIOSO: um
+        # state sem `sala_mode` (escrito por código pré-sala, ou regressão futura)
+        # caía no ramo headless e a sessão rodava INVISÍVEL — foi exatamente o que
+        # aconteceu com 1dfc1ed6 (state de 15:16 sem a flag + worker novo às 21:18).
+        #
+        # Correção (A1 do plano): ausência de `sala_mode` é estado ANÔMALO, não um
+        # caso tolerado. Em vez de rodar mudo, NORMALIZA pra sala e AVISA loud — a
+        # sessão nunca roda invisível, e nunca se perde trabalho. run_claude segue
+        # no arquivo como código DORMENTE (não-alcançável por este roteador); se a
+        # própria sala não puder subir (tmux ausente/falha), run_sala já falha duro.
+        if not state.get("sala_mode"):
+            logger.warning(
+                "state sem sala_mode — promovendo a sala (estado anômalo, BUG 1)"
+            )
+            state = _patch_state(state_path, sala_mode=True)
+            _notify_error(
+                kobe_home,
+                f"⚠️ [coder] sessão `{state.get('short_id', '?')}` veio sem marca "
+                f"de sala (state antigo/anômalo) — promovida a sala automaticamente. "
+                f"Nenhuma sessão de Coder roda invisível.",
+            )
+        return run_sala(state_path=state_path, mode=args.mode, kobe_home=kobe_home)
     except Exception as exc:  # noqa: BLE001 — captura tudo pra deixar state sano
         logger.exception("worker exception")
         try:

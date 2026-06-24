@@ -6,6 +6,26 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 >
 > **Régua de detalhe (changelog público).** Este repositório é público — então o changelog descreve a **mudança técnica**, nunca o **ambiente ou processo pessoal do operador**. Detalhe é bom, mas detalhe operacional-pessoal (caminhos absolutos, nomes próprios, topologia de deploy específica) é vazamento: descreva *o que o código faz*, não *onde/como o operador roda*. Nomes concretos de ambiente vivem na camada de usuário (D), fora do que é versionado.
 
+## [Unreleased] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
+
+> Em progresso. Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
+
+### BUG 1 — dispatch SEMPRE nasce sala (mata o fallback silencioso)
+
+**Operador pediu:** disparo de sessão de código tem que SEMPRE abrir uma sala navegável com remote control — não existe sessão rodando invisível. Matar o ramo que rodava sem sala calado.
+
+**Por quê:** o roteador do worker decidia `run_sala if state.get("sala_mode") else run_claude`. Um state escrito por uma versão anterior (sem a marca de sala) caía no ramo headless **silenciosamente** — a sessão rodava sem sala anexável, inalcançável durante toda a execução. Enquanto esse fallback mudo existisse, qualquer state "antigo" reabria a falha. (Causa reconstruída do histórico: a marca de sala só passou a ser escrita no dispatch depois que o state da sessão-incidente já tinha sido criado; o worker, já com o roteador novo, leu um state sem a marca.)
+
+**Foi feito:**
+- Roteador reescrito: ausência da marca de sala é tratada como **estado anômalo**, não tolerado — a sessão é **promovida a sala** e o operador é **avisado** (kobe-notify), em vez de rodar invisível. A sessão nunca roda fora de uma sala.
+- O caminho headless (`run_claude`) vira **código dormente** (não-alcançável pelo roteador). Se a própria sala não puder subir (tmux ausente/falha), esse caminho já falha duro — não há degradação silenciosa pra invisível.
+
+**Testes (ambiente de desenvolvimento):** `py_compile`; teste comportamental do roteador — caso A (state sem a marca → promove a sala, normaliza a marca, avisa loud, **nunca** chama o caminho headless) e caso B (state com a marca → sala direto, sem ruído). Ambos verdes.
+
+**Commits:** ver `git log`. **NÃO publicado.**
+
+**Reversão:** aditiva — `git revert` do commit. Volta ao roteador anterior (com o fallback). Nenhum dado fora do git tocado.
+
 ## [0.7.0] — 2026-06-23 — Faxina de privacidade: split do deploy (camada D) + despersonalização
 
 **Operador pediu:** o plugin é público e vazava o ambiente pessoal do operador pro GitHub — os termos do deploy dele cravados no contrato, caminhos absolutos, o nome do operador e o nome do agente. Tirar tudo isso do que é público, sem perder a função.
