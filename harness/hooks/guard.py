@@ -384,6 +384,61 @@ def _is_local_or_plan(path: str) -> bool:
         return False
 
 
+def _bash_write_targets(tokens: list[str]) -> list[str]:
+    """Best-effort: alvos de ESCRITA de arquivo num comando Bash, a partir dos
+    TOKENS (shlex) — não do texto cru. Tokenizar evita o falso-positivo clássico
+    de um `>` DENTRO de aspas (ex.: `kobe-notify "use a>b"`), que o shlex mantém
+    como um token só, não como operador de redirect. Cobre os vetores óbvios
+    (redirect `>`/`>>`, `tee`, `sed -i`); não é exaustivo (um `python -c` que
+    abre arquivo escapa) — é o mesmo best-effort do gate de changelog, e fecha o
+    desvio TRIVIAL do gate de plano."""
+    targets: list[str] = []
+    n = len(tokens)
+    for i, t in enumerate(tokens):
+        # redirect como operador isolado: `> FILE` / `>> FILE`
+        if t in (">", ">>"):
+            if i + 1 < n:
+                targets.append(tokens[i + 1])
+        # redirect colado: `>FILE` / `>>FILE` — exclui fd-dup (`>&2`) e `2>`/`&>`
+        # (esses não começam com `>` seguido de char-de-path).
+        elif re.match(r"^>>?[^>&]", t):
+            targets.append(re.sub(r"^>>?", "", t))
+        # `tee [opts] FILE...`
+        elif t == "tee":
+            for nt in tokens[i + 1:]:
+                if not nt.startswith("-"):
+                    targets.append(nt)
+                    break
+    # `sed -i[suffix] ... FILE` (edição in-place do último arg-arquivo)
+    if "sed" in tokens and any(
+        x == "-i" or x.startswith("-i") or x == "--in-place" for x in tokens
+    ):
+        if tokens and not tokens[-1].startswith("-"):
+            targets.append(tokens[-1])
+    return targets
+
+
+def _bash_writes_production(tokens: list[str], cwd: str) -> str | None:
+    """Retorna o alvo se algum write do Bash cai FORA de `.local`/`/tmp`/`/dev`
+    (= código de produção), senão None. Alvos seguros pré-aprovação (rascunho em
+    `.local`, scratch em `/tmp`, `/dev/null`) são liberados."""
+    for raw in _bash_write_targets(tokens):
+        t = raw.strip("'\"")
+        if not t or t in ("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"):
+            continue
+        p = t if os.path.isabs(t) else os.path.join(cwd or ".", t)
+        try:
+            parts = Path(p).parts
+        except Exception:  # noqa: BLE001
+            continue
+        if ".local" in parts:
+            continue
+        if p.startswith("/tmp") or p.startswith("/dev") or p.startswith("/proc"):
+            continue
+        return t
+    return None
+
+
 def _notify_operator_blocked(state: dict | None) -> None:
     """Auto-report determinístico: avisa o operador quando o gate de plano TRAVA
     a sessão (a aprovação não chegou à flag `plan_approved`). É a rede contra o
@@ -502,6 +557,20 @@ def main() -> int:
                     "kobe-attach e encerre o turno aguardando o OK. Rascunhos em "
                     "`.local/` são livres."
                 )
+            # Fecha o desvio do gate via Bash: `echo > prod`, `tee prod`, `sed -i`
+            # gravavam código de produção SEM passar por Edit/Write (que o gate
+            # acima pega). Só vale pra Bash não-comm-only (kobe-notify segue livre).
+            if tool_name == "Bash" and not _is_comm_only(command):
+                wtarget = _bash_writes_production(tokens, cwd)
+                if wtarget is not None:
+                    _notify_operator_blocked(state)
+                    _deny(
+                        "[guard:plan] Escrita em arquivo de produção via Bash "
+                        f"bloqueada (`{wtarget}`): o plano ainda não foi aprovado "
+                        "(§10). Detectei redirect/`tee`/`sed -i` fora de `.local`. "
+                        "Rascunho vai em `.local/` (livre) ou espere a aprovação. "
+                        "(Best-effort: cobre os vetores óbvios, não tudo.)"
+                    )
 
     return 0
 

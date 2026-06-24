@@ -26,6 +26,20 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert` do commit. Sem auto-report, volta ao `deny` silencioso anterior. Nada fora do git tocado.
 
+### BUG 0b — fecha o desvio do gate de plano via Bash-write
+
+**Operador pediu:** fechar o buraco onde uma sessão poderia escrever código de produção via Bash (`echo >`, `tee`, `sed -i`), driblando o gate de plano que só cobria as ferramentas Edit/Write.
+
+**Por quê:** o gate PARA-e-espera (§10) bloqueava edição de produção por `Edit/Write/MultiEdit/NotebookEdit`, mas **não** por Bash — uma sessão (com bug/injeção de prompt) poderia gravar produção por redirect e escapar do "PARA-e-espera". Achado durante esta própria sessão.
+
+**Foi feito:** o gate de plano agora também detecta escrita de produção via Bash (redirect `>`/`>>`, `tee`, `sed -i`) e nega pré-aprovação. Detecção **token-based** (shlex, não texto cru) pra evitar o falso-positivo clássico de um `>` **dentro de aspas** (ex.: `kobe-notify "a > b"` segue livre). Best-effort e documentado (não é exaustivo — um script que abre arquivo escapa; é o mesmo nível do gate de changelog). Alvos seguros (`.local`, `/tmp`, `/dev/null`) liberados.
+
+**Testes (ambiente de desenvolvimento):** suíte do guard estendida — write em produção (redirect/`tee`/`sed -i`) negado; write seguro (`.local`//tmp//dev/null) e `2>&1` liberados; **falso-positivo de `>` citado liberado**; read-only liberado; pós-aprovação liberado. Regressão completa verde.
+
+**Commits:** ver `git log`. **NÃO publicado.**
+
+**Reversão:** aditiva — `git revert`. Volta ao gate cobrindo só Edit/Write.
+
 ### BUG 1 — dispatch SEMPRE nasce sala (mata o fallback silencioso)
 
 **Operador pediu:** disparo de sessão de código tem que SEMPRE abrir uma sala navegável com remote control — não existe sessão rodando invisível. Matar o ramo que rodava sem sala calado.
