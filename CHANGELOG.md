@@ -40,6 +40,22 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert`. Volta ao gate cobrindo só Edit/Write.
 
+### Gate de deploy ativado (`--public-remotes`) + propagação pra sala
+
+**Operador pediu:** ativar a proteção que bloqueia push pro repo público sem aprovação — estava inativa porque a config de "quais remotes são públicos" estava vazia.
+
+**Por quê:** o gate de deploy (§10) só bloqueia push pra um remote "público" se souber QUAL é o público (via `KOBE_CODER_PUBLIC_REMOTES`). Vazio → gate inativo → o código não impediria um push pro repo público (a proteção dependia só da disciplina da sessão). E tem uma armadilha de propagação: a sala tmux **não herda** o env do worker (só 3 vars via `-e`), então setar o env no bot **não** chegaria à sala — o gate continuaria cego no caminho que mais importa.
+
+**Foi feito:**
+- O `guard` passa a aceitar `--public-remotes` via **argv** (preferido sobre o env). O worker (`_build_session_settings`) **lê** `KOBE_CODER_PUBLIC_REMOTES` (que herda do bot) e **passa o valor** pro hook por argv — assim a proteção funciona dentro da sala, sem depender de propagação de env. Fallback pro env preservado (caminho headless).
+- A config concreta (`=prod`) é dado do operador, fora do repo público (vive no `.env` do bot, não versionado) — o plugin só fornece o mecanismo, portável.
+
+**Testes (ambiente de desenvolvimento):** push pro remote público sem `deploy_approved` → negado; com aprovação → liberado; push pro remote privado → liberado; sem config de público → gate inativo (retrocompat). Suíte do guard verde.
+
+**Commits:** ver `git log`. **NÃO publicado.**
+
+**Reversão:** aditiva — `git revert`. Sem o argv, o gate volta a depender só do env.
+
 ### BUG 1 — dispatch SEMPRE nasce sala (mata o fallback silencioso)
 
 **Operador pediu:** disparo de sessão de código tem que SEMPRE abrir uma sala navegável com remote control — não existe sessão rodando invisível. Matar o ramo que rodava sem sala calado.

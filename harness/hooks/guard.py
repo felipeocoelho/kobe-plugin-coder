@@ -309,11 +309,16 @@ def _check_changelog_gate(command: str, cwd: str, tokens: list[str]) -> None:
 
 
 # === Gate de deploy: o passo público EXIGE OK (§6, §10) ===================
-def _public_remotes() -> set[str]:
-    """Remotes considerados 'públicos' (tocam usuário externo). Config por env
-    `KOBE_CODER_PUBLIC_REMOTES` (vírgula-separado). Vazio = gate inativo (sem
-    falso-positivo: projetos sem deploy público não são afetados)."""
-    raw = os.environ.get("KOBE_CODER_PUBLIC_REMOTES", "").strip()
+def _public_remotes(cli_value: str | None = None) -> set[str]:
+    """Remotes considerados 'públicos' (tocam usuário externo). Config por argv
+    `--public-remotes` (PREFERIDO — o worker lê o env e passa o valor pro hook,
+    porque a sala tmux não herda o env do worker, só 3 vars via `-e`) OU env
+    `KOBE_CODER_PUBLIC_REMOTES` (fallback, p/ o caminho headless). Vírgula-separado.
+    Vazio = gate inativo (sem falso-positivo: projetos sem deploy público não
+    são afetados)."""
+    raw = (cli_value or "").strip()
+    if not raw:
+        raw = os.environ.get("KOBE_CODER_PUBLIC_REMOTES", "").strip()
     return {r.strip() for r in raw.split(",") if r.strip()}
 
 
@@ -332,8 +337,10 @@ def _push_target_remote(tokens: list[str]) -> str | None:
     return None
 
 
-def _check_deploy_gate(command: str, tokens: list[str], state: dict | None) -> None:
-    publics = _public_remotes()
+def _check_deploy_gate(
+    command: str, tokens: list[str], state: dict | None, cli_public: str | None = None
+) -> None:
+    publics = _public_remotes(cli_public)
     if not publics:
         return
     if not (re.search(r"\bgit\b", command) and "push" in tokens):
@@ -490,6 +497,9 @@ def _notify_operator_blocked(state: dict | None) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--state", default=None, help="path do state.json da sessão (fora do env da sessão)")
+    ap.add_argument("--public-remotes", default=None,
+                    help="remotes públicos (vírgula-sep) — o worker passa lendo o env, "
+                         "pra a sala não precisar herdar KOBE_CODER_PUBLIC_REMOTES")
     args, _ = ap.parse_known_args()
 
     try:
@@ -539,7 +549,7 @@ def main() -> int:
         if _env_on("KOBE_CODER_GATE_CHANGELOG"):
             _check_changelog_gate(command, cwd, tokens)
         if _env_on("KOBE_CODER_GATE_DEPLOY"):
-            _check_deploy_gate(command, tokens, state)
+            _check_deploy_gate(command, tokens, state, args.public_remotes)
 
     # Gate PARA-e-espera-OK.
     if state is not None and _env_on("KOBE_CODER_GATE_PLAN") and not state.get("plan_approved"):

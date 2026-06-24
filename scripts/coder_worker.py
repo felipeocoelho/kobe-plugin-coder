@@ -543,9 +543,17 @@ def _build_session_settings(
         # O path do state vai como ARGV do hook (controlado pelo worker), NÃO no env
         # da sessão — assim a sessão não conhece o path do próprio cadeado e não
         # pode reescrever plan_approved/halted via Bash (B1 da revisão).
+        # Remotes públicos (gate de deploy): o worker LÊ o env (que herda do bot)
+        # e passa o VALOR pro hook via argv — porque a sala tmux não herda o env
+        # do worker (só 3 vars via `-e`). Sem isso, o gate ficaria inativo na sala
+        # mesmo com KOBE_CODER_PUBLIC_REMOTES setado no .env do bot.
+        public_remotes = os.environ.get("KOBE_CODER_PUBLIC_REMOTES", "").strip()
+        pr_arg = (
+            f" --public-remotes {shlex.quote(public_remotes)}" if public_remotes else ""
+        )
         hook_cmd = (
             f"{shlex.quote(python)} {shlex.quote(str(guard))} "
-            f"--state {shlex.quote(str(state_path))}"
+            f"--state {shlex.quote(str(state_path))}{pr_arg}"
         )
         settings["hooks"] = {
             "PreToolUse": [
