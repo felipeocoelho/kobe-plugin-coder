@@ -425,6 +425,18 @@ def cmd_start(args: argparse.Namespace) -> int:
             run_cwd = Path(wt["worktree_path"])
             worktree_fields.update(wt)
 
+    # BUG 2 (integridade): registra o HEAD do início da sessão. Se ela morrer no
+    # meio (cota/crash/OOM), o resumo de fechamento isola EXATAMENTE os commits
+    # que ela criou (`head_sha_at_start..HEAD`) — verdade do git, sem garimpo.
+    # None se a cwd não for repo git (ou ainda não existir, em projeto novo).
+    head_sha_at_start: Optional[str] = None
+    try:
+        _hs = _git(["rev-parse", "HEAD"], run_cwd)
+        if _hs.returncode == 0:
+            head_sha_at_start = _hs.stdout.strip() or None
+    except Exception:  # noqa: BLE001 — best-effort; ausência degrada no resumo
+        head_sha_at_start = None
+
     state = {
         "session_id": session_id,
         "short_id": short,
@@ -433,6 +445,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "task": task,
         "created_at": _now_iso(),
         "last_activity": _now_iso(),
+        "head_sha_at_start": head_sha_at_start,
         "status": "starting",
         "pid": None,
         "worker_pid": None,

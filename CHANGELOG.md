@@ -42,6 +42,23 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert` do commit. Volta ao roteador anterior (com o fallback). Nenhum dado fora do git tocado.
 
+### BUG 2 — resumo de fechamento de sessão interrompida (integridade: "onde parou")
+
+**Operador pediu:** quando uma sessão morre no meio (cota/crash/OOM) tendo commitado, ele tem que saber NA HORA onde o código parou e se é seguro — sem garimpo manual de state + git + `.local`.
+
+**Por quê:** a sessão-incidente morreu por limite de gasto tendo feito 2 commits locais; descobrir o estado real exigiu garimpo. Pior: o checklist do plano (instrução LLM já existente — `remote-system.md` §"Checklist vivo") ficou **todo `[ ]`** apesar dos commits — ele **mentia**. Faltava um sinal **determinístico** de fechamento, ancorado na verdade do git e não no que a sessão *achava*.
+
+**Foi feito:**
+- `head_sha_at_start` gravado no dispatch (HEAD da cwd no início da sessão) — pra isolar **exatamente** os commits que a sessão criou (`head_sha_at_start..HEAD`).
+- **Resumo de fechamento determinístico** no worker: commits da sessão, estado vs upstream (push pendente), working tree limpo/sujo (trabalho solto = risco de perda), **checklist DECLARADO vs verdade do git** (reconcilia a ressalva do operador — conta `[x]`/`[ ]`, mostra o próximo item declarado e avisa que os commits são a verdade), e artefatos `.local` recentes. Entregue via `kobe-notify` (curto) + `kobe-attach` (completo) + campo `closing_summary` no state. **Idempotente** (morte detectada 2x não duplica o aviso).
+- Disparado nos caminhos de morte da sala: monitor detecta morte mid-turn; resume encontra a sala morta; crash do worker. Reforça **morte ≠ pronto**: nada é pushado sem auditoria + OK.
+
+**Testes (ambiente de desenvolvimento):** repo git temporário — isola os 2 commits da sessão (exclui o anterior ao start), flagra working tree sujo, conta o checklist declarado e mostra o próximo item, avisa que o git é a verdade; degrada sem `head_sha_at_start`; entrega (notify+attach+`closing_summary` no state) e idempotência verificadas com bins falsos.
+
+**Commits:** ver `git log`. **NÃO publicado.**
+
+**Reversão:** aditiva — `git revert`. Sem o resumo, volta ao comportamento anterior (só `status=dead`/`failed` no state). `head_sha_at_start` é campo extra inócuo.
+
 ## [0.7.0] — 2026-06-23 — Faxina de privacidade: split do deploy (camada D) + despersonalização
 
 **Operador pediu:** o plugin é público e vazava o ambiente pessoal do operador pro GitHub — os termos do deploy dele cravados no contrato, caminhos absolutos, o nome do operador e o nome do agente. Tirar tudo isso do que é público, sem perder a função.

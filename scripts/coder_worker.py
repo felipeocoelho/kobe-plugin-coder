@@ -23,6 +23,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -154,6 +155,154 @@ def _notify_error(kobe_home: Path, msg: str) -> None:
         )
     except Exception:  # noqa: BLE001 — best effort
         logger.exception("falha enviando kobe-notify de erro")
+
+
+# ───────────────────────── Resumo de fechamento (BUG 2) ─────────────────────
+# Quando uma sessão MORRE com trabalho feito (cota/crash/OOM), o operador ficava
+# sem saber "onde parou e é seguro?" — exigia garimpo manual (state + git +
+# .local). Aqui montamos um resumo determinístico (verdade do git, não o que a
+# sessão *achava*) e entregamos via kobe-notify/attach + campo no state.
+
+
+def _git_out(cwd: str | Path, args: list[str]) -> str | None:
+    """git read-only na cwd. Retorna stdout (strip) em sucesso, None em erro/exceção.
+    Para checagens de existência (rc 0, stdout vazio) retorna "" — distinto de None."""
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True, text=True, timeout=15,
+        )
+        return r.stdout.strip() if r.returncode == 0 else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _build_closing_summary(state: dict) -> str:
+    """Resumo legível de 'onde a sessão parou' — commits que ela criou, push
+    pendente, estado da árvore, checklist DECLARADO vs verdade do git, artefatos.
+    A régua é o git (autoritativo); o checklist do plano é o que a sessão *achava*
+    (a ressalva do operador: a faxina morreu com o checklist todo `[ ]` apesar de
+    2 commits). O resumo sinaliza divergência."""
+    cwd = state.get("cwd") or "."
+    short = state.get("short_id", "?")
+    start = state.get("head_sha_at_start")
+    head = _git_out(cwd, ["rev-parse", "--short", "HEAD"])
+    branch = _git_out(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])
+
+    L = [f"📍 [coder] sessão `{short}` encerrou — resumo de fechamento (onde parou):", ""]
+    L.append(f"• cwd: `{cwd}`")
+    L.append(f"• branch: `{branch or '?'}`  ·  HEAD: `{head or '?'}`")
+
+    # Commits criados DURANTE a sessão (head registrado no start → HEAD).
+    if not start:
+        L.append("• commits da sessão: head inicial não registrado — não dá pra isolar.")
+    elif _git_out(cwd, ["cat-file", "-e", f"{start}^{{commit}}"]) is None:
+        L.append(f"• commits da sessão: sha inicial `{start[:8]}` sumiu do repo (rebase/reset?).")
+    else:
+        log = _git_out(cwd, ["log", "--oneline", f"{start}..HEAD"])
+        if log:
+            L.append("• commits criados pela sessão (NÃO pushados sem teu OK):")
+            L += [f"    {ln}" for ln in log.splitlines()]
+        else:
+            L.append("• commits da sessão: nenhum (não commitou).")
+
+    # Estado vs upstream (ahead/behind) — sinal de push pendente.
+    sb = _git_out(cwd, ["status", "-sb"])
+    if sb:
+        L.append(f"• vs upstream: {sb.splitlines()[0].lstrip('#').strip()}")
+
+    # Working tree limpo ou com trabalho solto não-commitado.
+    dirty = _git_out(cwd, ["status", "--porcelain"])
+    if dirty is None:
+        L.append("• working tree: (cwd não é repo git ou git indisponível)")
+    elif dirty:
+        L.append("• working tree: SUJO — trabalho não-commitado (risco de perda):")
+        L += [f"    {ln}" for ln in dirty.splitlines()[:10]]
+    else:
+        L.append("• working tree: LIMPO (nada solto).")
+
+    # Checklist DECLARADO vs git (ressalva do operador). Pega o plano mais recente.
+    try:
+        planos = sorted(Path(cwd).glob(".local/plano-*.md"), key=lambda p: p.stat().st_mtime)
+    except Exception:  # noqa: BLE001
+        planos = []
+    if planos:
+        p = planos[-1]
+        try:
+            txt = p.read_text(encoding="utf-8")
+            done = len(re.findall(r"(?m)^\s*-\s*\[x\]", txt))
+            todo = len(re.findall(r"(?m)^\s*-\s*\[ \]", txt))
+            L.append(f"• checklist (`{p.name}`): {done} feito(s) declarado(s), {todo} pendente(s).")
+            m = re.search(r"(?m)^\s*-\s*\[ \]\s*(.+)$", txt)
+            if m:
+                L.append(f"    próximo declarado: {m.group(1).strip()[:120]}")
+            L.append("    ⚠️ checklist é o que a sessão DECLAROU — confira contra os commits acima (a verdade).")
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Artefatos recentes em .local (descartável, mas ponteiro útil).
+    try:
+        locdir = Path(cwd) / ".local"
+        arts = sorted(locdir.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True)[:5]
+        if arts:
+            L.append("• artefatos recentes `.local/`: " + ", ".join(a.name for a in arts))
+    except Exception:  # noqa: BLE001
+        pass
+
+    L.append("")
+    L.append("⚠️ Morte ≠ pronto: nada é pushado sem auditoria + teu OK.")
+    return "\n".join(L)
+
+
+def _emit_closing_summary(state_path: Path, kobe_home: Path) -> None:
+    """Monta o resumo de fechamento, grava no state (`closing_summary`) e entrega
+    ao operador: notify curto + attach do arquivo completo. Best-effort e blindado
+    — nunca propaga exceção pro caminho de morte que o chamou."""
+    try:
+        state = _read_state(state_path)
+    except Exception:  # noqa: BLE001
+        return
+    # Idempotência: não reemite se já houver resumo (morte detectada 2x).
+    if state.get("closing_summary"):
+        return
+    try:
+        summary = _build_closing_summary(state)
+    except Exception:  # noqa: BLE001
+        logger.exception("falha montando resumo de fechamento")
+        return
+    try:
+        _patch_state(state_path, closing_summary=summary)
+    except Exception:  # noqa: BLE001
+        pass
+    short = state.get("short_id", "sess")
+    try:
+        cwd = Path(state.get("cwd") or ".")
+        outdir = cwd / ".local"
+        outdir.mkdir(parents=True, exist_ok=True)
+        outf = outdir / f"closing-{short}.md"
+        outf.write_text(summary, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        outf = None
+    notify_bin = kobe_home / "bot" / "bin" / "kobe-notify"
+    attach_bin = kobe_home / "bot" / "bin" / "kobe-attach"
+    have_env = bool(os.environ.get("KOBE_TELEGRAM_BOT_TOKEN") and os.environ.get("KOBE_CHAT_ID"))
+    if have_env and notify_bin.is_file():
+        head = (
+            f"📍 [coder] sessão `{short}` encerrou — resumo de fechamento "
+            f"(onde parou) {'em anexo' if outf else 'abaixo'}. Morte ≠ pronto: "
+            f"nada pushado sem teu OK."
+        )
+        try:
+            subprocess.run([str(notify_bin), head if outf else summary],
+                           timeout=15, capture_output=True)
+        except Exception:  # noqa: BLE001
+            pass
+    if have_env and outf is not None and attach_bin.is_file():
+        try:
+            subprocess.run([str(attach_bin), str(outf), "Resumo de fechamento da sessão"],
+                           timeout=20, capture_output=True)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _build_system_prompt(plugin_root: Path, cwd: Path, effort: str = "standard") -> str:
@@ -824,6 +973,8 @@ def _monitor_sala(state_path: Path, sala: str, kobe_home: Path) -> int:
             _notify_error(kobe_home,
                           f"🔴 [coder] a sala `{sala}` caiu durante o turno. "
                           f"Abra uma nova pra continuar.")
+            # BUG 2: morte com trabalho feito → resumo de fechamento (onde parou).
+            _emit_closing_summary(state_path, kobe_home)
             return 1
         pane = _tmux("capture-pane", "-t", sala, "-p").stdout
         last_text = _extract_pane_last(pane)
@@ -872,6 +1023,8 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
                 f"🔴 [coder] sessão `{state['short_id']}` — a sala `{sala}` não "
                 f"está mais viva; não dá pra retomar. Abra uma nova.",
             )
+            # BUG 2: a sala morreu entre turnos — resumo de fechamento (onde parou).
+            _emit_closing_summary(state_path, kobe_home)
             return 1
         pending = (state.get("pending_input") or "").strip()
         if pending:
@@ -1035,6 +1188,8 @@ def main() -> int:
                 kobe_home,
                 f"🔴 [coder] worker crashou: {exc!r}",
             )
+            # BUG 2: crash com trabalho feito → resumo de fechamento (onde parou).
+            _emit_closing_summary(state_path, kobe_home)
         except Exception:  # noqa: BLE001
             pass
         return 99
