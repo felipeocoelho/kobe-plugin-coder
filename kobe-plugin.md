@@ -1,7 +1,7 @@
 ---
 name: coder
 visibility: public
-version: 0.7.0
+version: 0.8.0
 description: "Dispara sessões remotas de Claude Code em background na VPS — modo dev assíncrono via Telegram. A sessão remota recebe a missão, produz um plano em anexo (`.local/plano-*.md`) e PARA aguardando aprovação do operador antes de codar. Após OK, executa marcando checklist vivo conforme avança, com `kobe-notify` a cada marco. Estado em `user-data/coder-sessions/<topic>/<session>.json`; presença global em `user-data/claude-presence/<pid>.json`. Antes de disparar, avisa (não bloqueia) se já há instância Claude Code ativa na mesma cwd."
 triggers:
   - "operador pede pra implementar/codar/refatorar/fazer fix em algum projeto na VPS"

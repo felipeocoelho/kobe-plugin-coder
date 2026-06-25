@@ -6,9 +6,9 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 >
 > **Régua de detalhe (changelog público).** Este repositório é público — então o changelog descreve a **mudança técnica**, nunca o **ambiente ou processo pessoal do operador**. Detalhe é bom, mas detalhe operacional-pessoal (caminhos absolutos, nomes próprios, topologia de deploy específica) é vazamento: descreva *o que o código faz*, não *onde/como o operador roda*. Nomes concretos de ambiente vivem na camada de usuário (D), fora do que é versionado.
 
-## [Unreleased] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
+## [0.8.0] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
 
-> Em progresso. Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
+> Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
 
 ### `--session-id` na sala (recuperabilidade)
 
@@ -20,7 +20,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** `py_compile`; sala real sobe com `--session-id` (sem erro no pane, sem token); launcher gerado passa `bash -n` com o flag na ordem certa.
 
-**Commits:** ver `git log`. **NÃO publicado** (no sentido do repo público).
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert`. Volta ao launcher sem `--session-id`.
 
@@ -36,7 +36,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** suíte completa do guard (regressão — todos verdes) + casos novos (deny intacto com notify on/off; `.local` livre mesmo com notify on) + teste de caminho-feliz com `kobe-notify` falso: dispara, cita o id curto da sessão, guia pro canal de controle, e o throttle segura o 2º disparo.
 
-**Commits:** ver `git log`. **NÃO publicado.**
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert` do commit. Sem auto-report, volta ao `deny` silencioso anterior. Nada fora do git tocado.
 
@@ -50,7 +50,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** suíte do guard estendida — write em produção (redirect/`tee`/`sed -i`) negado; write seguro (`.local`//tmp//dev/null) e `2>&1` liberados; **falso-positivo de `>` citado liberado**; read-only liberado; pós-aprovação liberado. Regressão completa verde.
 
-**Commits:** ver `git log`. **NÃO publicado.**
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert`. Volta ao gate cobrindo só Edit/Write.
 
@@ -66,7 +66,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** push pro remote público sem `deploy_approved` → negado; com aprovação → liberado; push pro remote privado → liberado; sem config de público → gate inativo (retrocompat). Suíte do guard verde.
 
-**Commits:** ver `git log`. **NÃO publicado.**
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert`. Sem o argv, o gate volta a depender só do env.
 
@@ -82,7 +82,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** `py_compile`; teste comportamental do roteador — caso A (state sem a marca → promove a sala, normaliza a marca, avisa loud, **nunca** chama o caminho headless) e caso B (state com a marca → sala direto, sem ruído). Ambos verdes.
 
-**Commits:** ver `git log`. **NÃO publicado.**
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert` do commit. Volta ao roteador anterior (com o fallback). Nenhum dado fora do git tocado.
 
@@ -99,7 +99,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** repo git temporário — isola os 2 commits da sessão (exclui o anterior ao start), flagra working tree sujo, conta o checklist declarado e mostra o próximo item, avisa que o git é a verdade; degrada sem `head_sha_at_start`; entrega (notify+attach+`closing_summary` no state) e idempotência verificadas com bins falsos.
 
-**Commits:** ver `git log`. **NÃO publicado.**
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert`. Sem o resumo, volta ao comportamento anterior (só `status=dead`/`failed` no state). `head_sha_at_start` é campo extra inócuo.
 
@@ -113,7 +113,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** `py_compile`; flag confirmado real no CLI (sem chamada de API); launcher gerado passa `bash -n`, usa `--append-system-prompt-file` e não tem mais `$(cat)`; paridade do conteúdo preservada (o arquivo raw é a fonte — preserva inclusive o newline final que o `$(cat)` comeria).
 
-**Commits:** ver `git log`. **NÃO publicado.**
+**Commits:** ver `git log`. **Publicado** em 0.8.0.
 
 **Reversão:** aditiva — `git revert`. Volta ao `--append-system-prompt "$(cat ...)"`. O arquivo do sysprompt segue sendo escrito igual.
 
@@ -132,7 +132,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** `py_compile` + suíte funcional de `_build_system_prompt` cobrindo camada D **presente** (header + conteúdo do perfil injetados) e **ausente** (nota graciosa, sem crash), e harness B íntegro no prompt montado. Todos passaram.
 
-**Commits:** v0.7.0 (ver `git log`). **NÃO publicado** — aguarda OK do operador para o deploy (e para a reescrita de história, em passo dedicado).
+**Commits:** v0.7.0 (ver `git log`). **Publicado** em 0.7.0.
 
 **Reversão:** aditiva. Rollback = `git revert` dos commits de v0.7.0. A camada D ausente degrada graciosamente; nada fora do git foi migrado (o `deploy-profile.md` real é gitignored e não versionado).
 
@@ -149,7 +149,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Testes (ambiente de desenvolvimento):** `_effort_flags` (standard→sem flag; max→`--effort max`; model só com env); cmd montado inclui/omite o flag certo (start e resume pelo mesmo caminho); prompt P2 anuncia boot em max + crivo elevado; **integração real**: `claude -p --effort max` + `--settings` do guard coexistindo — sessão sobe em max esforço E a deny-list segue bloqueando (`git reset --hard` negado). Regressão completa (guard ~70 casos + worktree) verde.
 
-**Commits:** v0.6.1 (ver `git log`). **Commit local — NÃO publicado** (repo dev/prod e restart aguardam OK explícito do operador, em passo único).
+**Commits:** v0.6.1 (ver `git log`). **Publicado** em 0.7.0.
 
 **Reversão:** aditiva e mínima. Rollback = `git revert` do commit de v0.6.1. Sem `--effort-max`, nada muda (Procedimento 1, comportamento já existente).
 
