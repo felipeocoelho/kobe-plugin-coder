@@ -892,7 +892,14 @@ def _looks_like_kobe_notify_was_sent(state: dict, kobe_home: Path) -> bool:
 
 
 def _sala_name(state: dict) -> str:
-    return f"coder-{state['short_id']}"  # label que aparece no app
+    """Nome da sala tmux (label visível no app). `coder-<slug>-<short>` quando há
+    slug (alude à missão); senão `coder-<short>` (FALLBACK obrigatório — sessões
+    antigas sem o campo `slug`, e a própria sessão que gerou esta mudança, têm que
+    resolver pro mesmo nome de sempre, ou um resume pós-deploy não acharia a sala).
+    O `short_id` é sempre o ÚLTIMO segmento — o cleanup extrai por rsplit('-')."""
+    slug = (state.get("slug") or "").strip()
+    short = state["short_id"]
+    return f"coder-{slug}-{short}" if slug else f"coder-{short}"
 
 
 def _tmux(*args: str) -> subprocess.CompletedProcess:

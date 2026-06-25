@@ -22,8 +22,10 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,7 +77,9 @@ def _cleanup_stale_salas(kobe_home: Path) -> None:
         terminal = {"dead", "failed", "terminated", "crashed", "merged"}
         now = datetime.now(timezone.utc)
         for sala in salas:
-            st = by_short.get(sala[len("coder-"):])
+            # short_id é o ÚLTIMO segmento do nome (`coder-<slug>-<short>` OU
+            # `coder-<short>`) — extrai por rsplit pra não quebrar com slug (Frente 3).
+            st = by_short.get(sala.rsplit("-", 1)[-1])
             if st is None:
                 continue  # sem state conhecido — não é nossa / não mexe
             kill = st.get("status") in terminal
@@ -166,6 +170,27 @@ def _merge_lock(kobe_home: Path):
         with contextlib.suppress(Exception):
             fcntl.flock(fh, fcntl.LOCK_UN)
         fh.close()
+
+
+def _slugify_task(task: str, max_len: int = 24) -> str:
+    """Slug kebab-case ASCII a partir do texto da tarefa, pra o nome da sala
+    aludir à missão (ex.: 'blindar-resume'). Determinístico (código): tira acento,
+    baixa caixa, mantém só [a-z0-9-], colapsa hifens, corta no limite SEM partir
+    palavra no meio. Retorna '' se não sobrar nada utilizável — aí o nome da sala
+    cai no fallback `coder-<short>` (ver `_sala_name`)."""
+    if not task:
+        return ""
+    norm = unicodedata.normalize("NFKD", task)
+    norm = "".join(c for c in norm if not unicodedata.combining(c)).lower()
+    out = re.sub(r"[^a-z0-9]+", "-", norm).strip("-")
+    if not out:
+        return ""
+    if len(out) > max_len:
+        cut = out[:max_len]
+        if "-" in cut:  # não corta a última palavra pela metade
+            cut = cut.rsplit("-", 1)[0]
+        out = cut.strip("-")
+    return out
 
 
 def _kobe_home() -> Path:
@@ -402,6 +427,10 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     session_id = str(uuid.uuid4())
     short = session_id[:8]
+    # Slug kebab-case da missão pro nome da sala (Frente 3) — gravado no estado
+    # pra SOBREVIVER a resume (o nome da sala é derivado do state, não recalculado
+    # do texto a cada turno; assim um resume nunca procura uma sala com nome novo).
+    slug = _slugify_task(task)
     topic_dir = _sessions_dir(kobe_home, topic_key)
     topic_dir.mkdir(parents=True, exist_ok=True)
     state_path = topic_dir / f"{session_id}.json"
@@ -440,6 +469,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     state = {
         "session_id": session_id,
         "short_id": short,
+        "slug": slug,
         "topic_key": topic_key,
         "cwd": str(run_cwd),
         "task": task,

@@ -28,6 +28,23 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert` do commit. Volta ao contrato sem §12/§13.
 
+### Frente 3 — slug kebab-case no nome da sala tmux
+
+**Operador pediu:** que o nome da janela tmux mantenha o hash mas ganhe um pedaço **kebab-case** aludindo à missão (ex.: `coder-blindar-resume-b2a91b0a`), com o slug gravado **no estado** pra sobreviver a resume (não se cortar sozinho num resume por nome diferente).
+
+**Por quê:** o nome era só `coder-<short>` (hash puro) — pouco legível na lista de salas do app. Gravar o slug no estado (não recalcular do texto a cada turno) garante que o resume sempre encontra a mesma sala.
+
+**Foi feito:**
+- `run_remote.py`: `_slugify_task()` (determinístico — tira acento, baixa caixa, só `[a-z0-9-]`, corta no limite sem partir palavra) gera o slug do texto da tarefa no `start`; gravado em `state["slug"]`.
+- `coder_worker.py` `_sala_name()`: `coder-<slug>-<short>` quando há slug; **fallback `coder-<short>`** quando não (sessões antigas sem o campo e a própria sessão desta mudança resolvem pro nome de sempre — sem auto-corte).
+- `run_remote.py` `_cleanup_stale_salas`: extrai o `short_id` pelo **último segmento** (`rsplit('-')`) em vez do prefixo fixo `coder-` — senão o cleanup nunca casaria salas com slug (regressão evitada).
+
+**Testes (ambiente de desenvolvimento):** `py_compile` dos dois arquivos; unit test do `_slugify_task` (acento, comprimento, vazio, pontuação); `_sala_name` com slug, sem campo, slug vazio e `None` (todos caem no fallback correto); extração do short no cleanup (`coder-<slug>-<short>` e `coder-<short>`). Todos verdes.
+
+**Commits:** ver `git log`.
+
+**Reversão:** aditiva — `git revert`. Sessões já criadas sem `slug` seguem no fallback; nada quebra.
+
 ## [0.8.0] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
 
 > Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
