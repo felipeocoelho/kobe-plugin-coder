@@ -6,6 +6,28 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 >
 > **Régua de detalhe (changelog público).** Este repositório é público — então o changelog descreve a **mudança técnica**, nunca o **ambiente ou processo pessoal do operador**. Detalhe é bom, mas detalhe operacional-pessoal (caminhos absolutos, nomes próprios, topologia de deploy específica) é vazamento: descreva *o que o código faz*, não *onde/como o operador roda*. Nomes concretos de ambiente vivem na camada de usuário (D), fora do que é versionado.
 
+## [0.9.0] — 2026-06-25 — Auditoria do contrato + 5 frentes (blindar resume, cwd dev-first, slug, invariante de dispatch, merge documentado)
+
+> Auditoria do Coder contra o contrato vivo (`harness/CONTRACT.md`), fechando a folga entre o que o contrato promete e o que o `guard.py`/worker cumprem. Nada de contrato novo — audita o que existe e acrescenta só o que falta. Cinco frentes: blindar o `resume` (Frente 0), cwd default dev-first (Frente 1), aprovação agnóstica de canal forma B (Frente 2), slug no nome da sala (Frente 3), rito/invariante auto-imposto ancorado (Frente 4).
+
+### Frente 4 — invariante de dispatch + isolamento/merge documentados no contrato
+
+**Operador pediu:** que "disparar uma sessão Coder pra fazer X" seja sinônimo **auditável** de o contrato inteiro ser honrado à risca — não uma promessa — e que o método de merge para sessões simultâneas (o exemplo dele) esteja escrito, não só no código.
+
+**Por quê:** o espírito "dispatch = contrato inteiro" estava difuso (§2, §3, §10) sem uma cláusula explícita; e o isolamento por worktree + merge serializado estava **implementado e robusto** no código (`_merge_lock`, `cmd_merge`) mas **sem seção em prosa** no contrato (só uma linha na tabela do §8), com a citação de seção do código apontando para um número inexistente.
+
+**Foi feito:**
+- Nova **§12** no `CONTRACT.md`: o dispatch é a autorização — disparar Coder já obriga o contrato inteiro, sem reespecificação. Inclui o mapa honesto do que é **trava de código** vs. **reforço de prompt** (remete à régua do §8), pra a garantia ser auditável e não prometer trava onde só há reforço.
+- Nova **§13** no `CONTRACT.md`: isolamento por worktree + merge de sessões simultâneas — descreve em prosa o método já implementado (serializado por lock, caminho de volta registrado antes, recusa árvore suja/detached/branch errada, nunca auto-resolve conflito). Responde à pergunta "como o Coder lida com sessões simultâneas".
+- `prompts/remote-system.md`: reforço do invariante (§12) no system prompt da sessão remota.
+- `CONTRACT.md` §11 (resumo operacional): dois itens novos apontando §12 e §13.
+
+**Testes (ambiente de desenvolvimento):** `tests/portability_guard.sh` (sem regressão); verificação de que as citações `§13.1` do código agora têm seção correspondente no contrato. Mudança de doc/prompt, sem runtime — risco operacional ~zero, rollback = `git revert`.
+
+**Commits:** ver `git log`.
+
+**Reversão:** aditiva — `git revert` do commit. Volta ao contrato sem §12/§13.
+
 ## [0.8.0] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
 
 > Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.

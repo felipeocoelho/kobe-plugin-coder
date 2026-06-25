@@ -285,3 +285,35 @@ O motor do Coder injeta **este harness (B)** no prompt da sua sessão de forma d
 6. **Changelog auditável** fecha todo trabalho (§6).
 7. **Deploy é git, nunca rsync; passo público exige OK** (§9).
 8. **Você opera sob B + C, nunca A** (§0, §10.2).
+9. **Sessões simultâneas** — isoladas por worktree; merge de volta serializado e conservador (§13).
+10. **Disparar Coder = honrar o contrato inteiro**, sempre, sem reespecificação (§12).
+
+---
+
+## 12. O dispatch é a autorização: disparar Coder = contrato inteiro
+
+Disparar uma sessão Coder para fazer X **é, por si só, a autorização e a obrigação de honrar este contrato inteiro, à risca** — não só o rito de quatro etapas (§2), mas TODA regra deste harness, mesmo que o operador não reespecifique nada na missão. O ato de abrir a sessão já carrega o contrato; a sessão não espera (nem deve esperar) que cada regra seja repetida para valer.
+
+Isto é o que separa **promessa** de **garantia**: a garantia é **auditável** — está escrita aqui, e o código a cumpre onde dá para cumprir por código. A honestidade sobre o que é trava de código vs. reforço de prompt está na régua do §8 (a tabela ✅/⏳). Em resumo:
+
+- **Travado por código** (a sessão não consegue furar): PARA-e-espera antes de codar produção (§10), deny-list de destrutivos (§4), gate de changelog (§6), gate de deploy público (§9/§10), HALT em conflito (§5.1), Procedimento 1 como default sem auto-escalação (§3).
+- **Reforço de prompt forte** (obrigação dura, não trava mecânica): rodar o Advogado do Diabo e a Revisão multi-lente (§2.2), e testar na medida do possível (§2.4). São indecidíveis por hook; o campo `Testes:` exigido em cada entrada de changelog (§6) os torna **visíveis na auditoria** — fechar trabalho sem relatar teste fica à vista.
+
+Não relaxe o autocontrole onde a parede é de prompt: a obrigação é a mesma; só o mecanismo de garantia difere.
+
+---
+
+## 13. Isolamento por worktree e merge de sessões simultâneas
+
+Quando o isolamento por worktree está ligado (feature-flag, default off), cada sessão roda numa **git worktree própria** — uma cópia isolada da mesma origem, numa branch dedicada (`coder/<short>`). Duas sessões simultâneas nunca escrevem a mesma árvore de trabalho ao mesmo tempo: cada uma tem a sua. É a aplicação do princípio da reversibilidade (§1) ao caso de concorrência — trabalho paralelo não se atropela. Se a cwd não for um repo git (ou a worktree não puder ser montada), a sessão degrada para a cwd original em vez de travar (reversibilidade > isolamento quando o isolamento não dá para montar).
+
+### 13.1 O merge de volta — serializado e conservador
+
+Mesclar a worktree de uma sessão de volta à árvore principal é uma operação **terminal e conservadora**, desenhada para reversibilidade:
+
+- **Serializada por lock** — um merge de cada vez na fila (`flock` exclusivo). Nunca dois merges concorrentes corrompem a árvore principal.
+- **Caminho de volta registrado ANTES de agir** (§1): grava o SHA pré-merge; o rollback é `reset --hard <sha>` ou o revert do merge.
+- **Recusa o que arrisca dado**: aborta se a árvore principal estiver suja (mudança não-salva), em detached HEAD, ou na branch errada (≠ a de origem da worktree); recusa se a própria worktree tiver trabalho não-commitado (o merge só leva commits).
+- **Nunca auto-resolve conflito**: se o merge conflita, faz `merge --abort` e reporta — a resolução é do operador (ou de outra sessão), à mão, depois. `--no-ff` preserva o histórico da sessão.
+
+Esta é a resposta auditável à pergunta "como o Coder lida com sessões simultâneas": isolamento por worktree na ida, merge serializado e conservador na volta — tudo verdade do git, sem atropelo.

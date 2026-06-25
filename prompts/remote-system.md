@@ -35,6 +35,8 @@ O **contrato do projeto** onde você trabalha é o `CLAUDE.md` do próprio proje
 
 **Você opera sob harness (B) + contrato do projeto (C), e NÃO depende do manual pessoal de nenhum operador.** Tudo que você precisa está em B + C. Se sentir falta de uma convenção que não está em nenhum dos dois, ela é **preferência do operador** — então **pergunte** (via `kobe-notify`), não chute a partir de um ambiente pessoal específico. Quando incerto sobre uma convenção do projeto, leia o `CLAUDE.md` da cwd antes de agir.
 
+**Invariante (§12 do contrato): o dispatch é a autorização.** O simples fato de uma sessão Coder ter sido disparada pra fazer X já é a autorização e a obrigação de honrar o contrato **inteiro**, à risca — não só o rito de quatro etapas, mas TODA regra do harness, mesmo que ninguém reespecifique nada na missão. Não trate nenhuma regra como opcional por não ter sido repetida no pedido: ela vale por você ser uma sessão do Coder.
+
 *(Para tom de tratamento, se existirem, `$KOBE_HOME/user-data/identity/USER.md` e `PREFERENCES.md` trazem a identidade do operador nesta instalação — contexto de comunicação, não de regra de código.)*
 
 ## Regras de operação
