@@ -10,6 +10,20 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > Em progresso. Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
 
+### `--session-id` na sala (recuperabilidade)
+
+**Operador pediu:** dar à sala um id de sessão **estável**, pra futuramente poder retomá-la com `--resume`.
+
+**Por quê:** o launcher da sala não usava `--session-id` (o headless `run_claude` usa) — a sala nascia com id **efêmero**, não-recuperável. Com um id estável (o mesmo do state), a sala vira recuperável: se morrer (crash; com `KillMode=process` no serviço já não morre em restart do bot), dá pra relançar com `--resume <id>` e continuar a conversa.
+
+**Foi feito:** o launcher da sala passa `--session-id <state.session_id>`. **Verificado de verdade** (não só o parser): uma sala real **sobe** com o flag, **sem gastar token** (testado sem prompt). O **resume-após-morte automático** (que USA o id) é um passo **separado** — hoje o `resume` ainda exige sala viva.
+
+**Testes (ambiente de desenvolvimento):** `py_compile`; sala real sobe com `--session-id` (sem erro no pane, sem token); launcher gerado passa `bash -n` com o flag na ordem certa.
+
+**Commits:** ver `git log`. **NÃO publicado** (no sentido do repo público).
+
+**Reversão:** aditiva — `git revert`. Volta ao launcher sem `--session-id`.
+
 ### BUG 0 — auto-report determinístico quando o gate de plano trava (mata o deadlock silencioso)
 
 **Operador pediu:** uma sessão aprovada que não destrava é um deadlock; e descobrir isso não pode exigir garimpo — a sessão tem que avisar sozinha quando trava.

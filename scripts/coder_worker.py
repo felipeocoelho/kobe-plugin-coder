@@ -1067,12 +1067,20 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
     settings_arg = (
         f"--settings {shlex.quote(str(settings_path))} " if settings_path else ""
     )
+    # `--session-id`: dá à sessão claude da sala um id ESTÁVEL (o mesmo do state),
+    # em vez de um id efêmero. Isso torna a sala RECUPERÁVEL — se ela morrer (crash;
+    # com KillMode=process já não morre em restart do bot), dá pra relançar com
+    # `--resume <session_id>` e continuar a conversa. Verificado: `--remote-control`
+    # aceita `--session-id` e a sala sobe com ele. (O resume-após-morte automático,
+    # que USA isso, é um passo separado — hoje o resume ainda exige sala viva.)
+    session_id = state["session_id"]
     launcher = salas_dir / f"{sala}-launch.sh"
     launcher.write_text(
         "#!/bin/bash\n"
         f"cd {shlex.quote(str(cwd))}\n"
         f"exec claude --permission-mode bypassPermissions "
-        f"--remote-control {shlex.quote(sala)} {settings_arg}"
+        f"--remote-control {shlex.quote(sala)} "
+        f"--session-id {shlex.quote(session_id)} {settings_arg}"
         f"--append-system-prompt-file {shlex.quote(str(sysprompt_path))} "
         f"{shlex.quote(launch_prompt)}\n",
         encoding="utf-8",
