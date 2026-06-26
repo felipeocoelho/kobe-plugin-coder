@@ -62,6 +62,22 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert`. Volta ao resume fire-and-forget anterior.
 
+### Frente 2 — aprovação agnóstica de canal (forma B: a sessão completa o deploy público)
+
+**Operador pediu:** que a sala consiga **completar o deploy público sozinha** quando autorizada, em vez de o passo final exigir um humano rodando o push. Decisão do operador: **forma B agora** (barata, não enfraquece a segurança), forma C (aprovar digitando na sala com segredo de uso único) fica como ciclo dedicado futuro.
+
+**Por quê:** o passo público já era gated (`guard._check_deploy_gate` nega `git push` pro remote público até `deploy_approved`), e a sessão já o executa quando autorizada — mas isso não estava **documentado** como invariante, e a autorização podia não chegar à sessão por causa da fragilidade do resume (agora corrigida na Frente 0). A forma B é exatamente isso: Frente 0 (confiabilidade) + documentação.
+
+**Foi feito:**
+- Nova **§9.1** no `CONTRACT.md`: o OK ao passo público é **autorização, não delegação** — a própria sessão executa o `git push` público quando liberada; a autorização **nasce fora da sessão** (trava dupla anti-auto-aprovação) e sua **entrega** é garantida pelo resume blindado (Frente 0). Registra a forma C como evolução parqueada, sem enfraquecer o modelo atual.
+- A confiabilidade da autorização chegar é a Frente 0 (commit anterior) — sem código novo aqui.
+
+**Testes (ambiente de desenvolvimento):** `tests/portability_guard.sh` (sem vazamento de ambiente pessoal — a §9.1 fala de mecanismo, não de paths). Mudança de doc — risco operacional ~zero, rollback = `git revert`.
+
+**Commits:** ver `git log`.
+
+**Reversão:** aditiva — `git revert`. Remove a §9.1; o comportamento do gate de deploy é inalterado (já existia).
+
 ## [0.8.0] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
 
 > Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.

@@ -248,6 +248,12 @@ Você não inventa como faz deploy. O harness (B) fixa só os **invariantes**, v
 
 Se a topologia de D e a de C se contradisserem → conflito → §5.1 (para e avisa). Se o projeto **declarar** seu deploy próprio como exceção → §5.2 (respeita, registrado).
 
+### 9.1 Quem executa o passo público (aprovação agnóstica de canal — forma B)
+
+O OK do operador ao passo público é **autorização, não delegação a um humano**: uma vez autorizado, **a própria sessão executa** o `git push` para o remote público — o gate de deploy libera (`deploy_approved` no state) e o `guard` deixa o push passar. O operador não precisa rodar o push à mão; ele **autoriza**, a sessão **publica**.
+
+A **autorização nasce fora da sessão** (pelo canal de controle do motor — a sessão não pode setar a própria flag, senão se auto-aprovaria; é a mesma trava dupla do gate de plano, §10). A confiabilidade de essa autorização **chegar** à sessão é garantida pelo caminho de retomada blindado (porteiro de prontidão + confirmação de entrega + lock de estado) — antes ela podia se perder em silêncio. Aprovar **digitando dentro da própria sala**, com prova de operador (segredo de uso único fora do alcance da IA), é uma evolução possível e parqueada para um ciclo dedicado — não enfraquece nada aqui, só muda *onde* o operador digita o OK.
+
 ---
 
 ## 10. A metodologia de execução (o ritual)
