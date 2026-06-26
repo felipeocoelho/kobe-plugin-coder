@@ -6,6 +6,28 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 >
 > **Régua de detalhe (changelog público).** Este repositório é público — então o changelog descreve a **mudança técnica**, nunca o **ambiente ou processo pessoal do operador**. Detalhe é bom, mas detalhe operacional-pessoal (caminhos absolutos, nomes próprios, topologia de deploy específica) é vazamento: descreva *o que o código faz*, não *onde/como o operador roda*. Nomes concretos de ambiente vivem na camada de usuário (D), fora do que é versionado.
 
+## [Unreleased]
+
+### Slug do nome da sala a partir do briefing via modelo barato (refinamento da Frente 3)
+
+**Operador pediu:** quando a missão chega no formato "leia o briefing X", o nome da sala devia aludir à missão DE VERDADE — não ao texto bruto do pedido. Ajuste cirúrgico só na geração de slug em `scripts/run_remote.py`, reusando um modelo barato que o projeto já tem, mantendo `_slugify_task` como fallback e nunca quebrando o `coder-<short>`.
+
+**Por quê:** o slug vinha de `_slugify_task(task)` sobre o texto bruto da tarefa. Como quase toda missão chega como "leia o briefing X antes de rodar", o slug virava lixo (`leia-completo-antes-de`) que não alude à missão — exatamente o que a Frente 3 (slug no nome da sala) queria evitar.
+
+**Foi feito:**
+- `scripts/run_remote.py`: quatro funções privadas novas + troca de 1 linha em `cmd_start` (de `_slugify_task(task)` para `_derive_slug(task, cwd)`). Nada mais no arquivo foi tocado.
+  - `_extract_briefing_path(task, cwd)`: detecta o padrão "brief(ing)" **E** um caminho `.md/.markdown/.txt` real (`is_file()`) — dupla condição pra baixo falso-positivo; resolve relativo contra a cwd; tira pontuação colada. None quando não casa.
+  - `_peek_briefing(path)`: olhada rápida nos primeiros ~3k chars do briefing; qualquer falha → "".
+  - `_slug_from_briefing_llm(content)`: pede um slug curto a um **modelo barato** (a mesma classe já usada no detector de conversa do framework), reusando credencial e biblioteca que já existem — **sem dependência nova, sem chave nova**. Import da lib é **lazy** (só no caminho que casa o padrão). Timeout curto (default 6s, override por `KOBE_CODER_SLUG_TIMEOUT`) + retries desligados + `try/except` total → **qualquer** falha (sem chave, offline, timeout, erro de API) retorna "". Nunca levanta.
+  - `_derive_slug(task, cwd)`: orquestra; a saída do LLM passa **sempre** por `_slugify_task` (kebab-case, ≤24 chars, corte em fronteira de palavra) — blinda contra saída estranha/injeção via o conteúdo do briefing. Cai no determinístico em qualquer ausência de slug.
+- **Invariante preservado:** a chamada de rede nunca trava nem derruba o disparo da sala — sem chave/offline/timeout/arquivo ilegível/padrão não-casado, tudo degrada pro `_slugify_task` determinístico; e o `coder-<short>` final (quando nem o texto bruto rende slug) segue intocado em `_sala_name`.
+
+**Testes (ambiente de desenvolvimento):** `.local/test_slug.py` — 15/15 casos verdes (sem rede; LLM mockado ou desligado): extração de caminho em vários phrasings + descritivo→None + arquivo inexistente→None + pontuação colada; fallback sem chave; sanitização da saída do LLM (caixa/espaço/pontuação, lixo→fallback, tentativa de injeção→kebab seguro ≤24, vazio→fallback); `coder-<short>` preservado (tarefa vazia/só-pontuação → slug ""); curto-circuito sem chave/conteúdo vazio. Smoke real opcional (chave presente) contra o briefing desta própria missão: o modelo barato rendeu `gerar-slug-significativo` em vez do lixo `leia-completo-antes-de`. `ast.parse` OK.
+
+**Commits:** ver `git log`. **Deploy:** NÃO incluído nesta entrega (aguarda OK do operador).
+
+**Reversão:** aditiva — `git revert` do commit. Reverter restaura `slug = _slugify_task(task)`; nenhum estado/migração envolvido.
+
 ## [0.9.0] — 2026-06-25 — Auditoria do contrato + 5 frentes (blindar resume, cwd dev-first, slug, invariante de dispatch, merge documentado)
 
 > Auditoria do Coder contra o contrato vivo (`harness/CONTRACT.md`), fechando a folga entre o que o contrato promete e o que o `guard.py`/worker cumprem. Nada de contrato novo — audita o que existe e acrescenta só o que falta. Cinco frentes: blindar o `resume` (Frente 0), cwd default dev-first (Frente 1), aprovação agnóstica de canal forma B (Frente 2), slug no nome da sala (Frente 3), rito/invariante auto-imposto ancorado (Frente 4).

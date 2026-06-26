@@ -172,6 +172,109 @@ def _merge_lock(kobe_home: Path):
         fh.close()
 
 
+# === Slug significativo a partir do briefing (Frente 3, refinamento) ======
+# Quase toda missão chega como "leia o briefing X antes de rodar" — slugificar
+# o texto BRUTO disso renderia lixo ("leia-o-briefing-antes-de-rodar"). Quando o
+# padrão casa, damos uma olhada rápida no conteúdo do briefing e extraímos um
+# slug que alude à missão de verdade, via o MESMO modelo barato que o Kobe já usa
+# no conversation_detector (gpt-4o-mini, mesma chave OPENAI_API_KEY, mesma lib
+# `openai`). Invariante DURO: a chamada de rede NUNCA trava nem derruba o disparo
+# — sem chave, offline, timeout, arquivo ilegível ou padrão não-casado, tudo cai
+# graciosamente no determinístico (`_slugify_task` / `coder-<short>`).
+
+_SLUG_MODEL = "gpt-4o-mini"  # mesma classe de modelo barato do conversation_detector
+_BRIEFING_RE = re.compile(r"\bbrief(?:ing)?\b", re.IGNORECASE)
+_PATH_RE = re.compile(r"[^\s'\"]+\.(?:md|markdown|txt)\b")
+
+_SLUG_SYS_PROMPT = (
+    "Você recebe o início de um briefing de uma missão de programação. "
+    "Responda APENAS com um slug curto em kebab-case (2 a 5 palavras, "
+    "minúsculas, sem acento, separadas por hífen) que resuma a MISSÃO CENTRAL "
+    "do briefing. Nada além do slug — sem aspas, sem explicação, sem pontuação."
+)
+
+
+def _slug_llm_timeout() -> float:
+    """Teto de rede da chamada ao modelo barato (segundos). Override via
+    KOBE_CODER_SLUG_TIMEOUT; default 6s — curto pra não atrasar o disparo."""
+    try:
+        return max(1.0, float(os.environ.get("KOBE_CODER_SLUG_TIMEOUT", "6") or 6))
+    except ValueError:
+        return 6.0
+
+
+def _extract_briefing_path(task: str, cwd: Path) -> Optional[Path]:
+    """Se a tarefa é do formato 'leia o briefing <arquivo>', devolve o Path do
+    briefing (absoluto direto; relativo resolvido contra `cwd`). Exige DUAS
+    condições — a palavra 'brief(ing)' E um caminho .md/.markdown/.txt extraível —
+    pra manter baixa a taxa de falso-positivo (ex.: 'escreva um briefing sobre X'
+    não tem caminho → None). Retorna None se não casar ou o arquivo não existir."""
+    if not task or not _BRIEFING_RE.search(task):
+        return None
+    m = _PATH_RE.search(task)
+    if not m:
+        return None
+    raw = m.group(0).rstrip(".,;:)\"'")  # tira pontuação colada ao fim do caminho
+    try:
+        p = Path(raw).expanduser()
+        if not p.is_absolute():
+            p = cwd / p
+        p = p.resolve()
+    except Exception:  # noqa: BLE001
+        return None
+    return p if p.is_file() else None
+
+
+def _peek_briefing(path: Path, max_chars: int = 3000) -> str:
+    """Olhada RÁPIDA no briefing: primeiros ~3k chars. Qualquer falha → ''."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _slug_from_briefing_llm(content: str) -> str:
+    """Pede ao modelo barato (gpt-4o-mini) um slug que aluda à missão do briefing.
+    Retorna '' em QUALQUER falha (sem chave, offline, erro de API, timeout) — o
+    caller cai no fallback determinístico. NUNCA levanta; NUNCA trava o disparo."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key or not content.strip():
+        return ""
+    try:
+        # Import lazy: só paga o custo quando o padrão casou; e um host sem a lib
+        # `openai` ainda dispara missões normais (cai no determinístico).
+        from openai import OpenAI
+
+        client = OpenAI(api_key=key, timeout=_slug_llm_timeout(), max_retries=0)
+        resp = client.chat.completions.create(
+            model=_SLUG_MODEL,
+            messages=[
+                {"role": "system", "content": _SLUG_SYS_PROMPT},
+                {"role": "user", "content": content},
+            ],
+            temperature=0.0,
+            max_tokens=12,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception:  # noqa: BLE001 — rede nunca derruba o disparo
+        return ""
+
+
+def _derive_slug(task: str, cwd: Path) -> str:
+    """Slug pro nome da sala. Quando a tarefa é 'leia o briefing <arquivo>',
+    extrai um slug SIGNIFICATIVO do conteúdo do briefing via modelo barato; senão
+    (ou em qualquer falha) usa o determinístico `_slugify_task`. A saída do LLM
+    passa SEMPRE por `_slugify_task` — blinda contra saída estranha/injeção via o
+    conteúdo do briefing (pior caso: slug seguro porém esquisito). Cai pra '' só
+    quando nem o texto bruto rende slug — aí `_sala_name` usa `coder-<short>`."""
+    briefing = _extract_briefing_path(task, cwd)
+    if briefing is not None:
+        llm = _slugify_task(_slug_from_briefing_llm(_peek_briefing(briefing)))
+        if llm:
+            return llm
+    return _slugify_task(task)
+
+
 def _slugify_task(task: str, max_len: int = 24) -> str:
     """Slug kebab-case ASCII a partir do texto da tarefa, pra o nome da sala
     aludir à missão (ex.: 'blindar-resume'). Determinístico (código): tira acento,
@@ -471,7 +574,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     # Slug kebab-case da missão pro nome da sala (Frente 3) — gravado no estado
     # pra SOBREVIVER a resume (o nome da sala é derivado do state, não recalculado
     # do texto a cada turno; assim um resume nunca procura uma sala com nome novo).
-    slug = _slugify_task(task)
+    # Quando a missão é "leia o briefing X", _derive_slug extrai um slug
+    # significativo do conteúdo do briefing (modelo barato), com fallback
+    # determinístico que nunca trava o disparo (ver `_derive_slug`).
+    slug = _derive_slug(task, cwd)
     topic_dir = _sessions_dir(kobe_home, topic_key)
     topic_dir.mkdir(parents=True, exist_ok=True)
     state_path = topic_dir / f"{session_id}.json"
