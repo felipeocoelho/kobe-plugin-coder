@@ -20,6 +20,8 @@ Convenção de envs (herdadas do bot do Kobe via cadeia de subprocess):
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import logging
 import os
@@ -58,10 +60,23 @@ def _write_state(state_path: Path, state: dict) -> None:
 
 
 def _patch_state(state_path: Path, **fields) -> dict:
-    state = _read_state(state_path)
-    state.update(fields)
-    state["last_activity"] = _now_iso()
-    _write_state(state_path, state)
+    # flock EXCLUSIVO no read-modify-write inteiro (Frente 0, buraco 2): sem ele,
+    # dois workers concorrentes (o monitor de um turno anterior ainda vivo + o
+    # resume novo) faziam read-modify-write intercalado e um clobberava o campo do
+    # outro — foi o que travou `turn_count` em 1 no incidente. O lock serializa:
+    # cada patch lê o estado JÁ com a escrita anterior aplicada. Lockfile separado
+    # (não-`.json`, fora do glob `*.json` de _resolve_session/_list_sessions).
+    lock_path = state_path.with_suffix(state_path.suffix + ".lock")
+    with open(lock_path, "w") as lf:
+        try:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            state = _read_state(state_path)
+            state.update(fields)
+            state["last_activity"] = _now_iso()
+            _write_state(state_path, state)
+        finally:
+            with contextlib.suppress(Exception):
+                fcntl.flock(lf, fcntl.LOCK_UN)
     return state
 
 
@@ -963,6 +978,40 @@ def _extract_pane_last(pane: str) -> str | None:
     return (bullets[-1].lstrip("● ").strip() or None) if bullets else None
 
 
+def _wait_pane_idle(sala: str, budget_s: float = 20.0, poll_s: float = 1.5) -> bool:
+    """Porteiro de prontidão (Frente 0, buraco 1): espera a sala ficar OCIOSA
+    (não-busy) antes de digitar. Teclas mandadas a uma TUI ocupada caem no vão —
+    foi um dos buracos do incidente. Retorna True se ficou ociosa dentro do
+    orçamento; False se seguiu ocupada (o chamador NÃO digita às cegas)."""
+    waited = 0.0
+    while waited < budget_s:
+        pane = _tmux("capture-pane", "-t", sala, "-p").stdout
+        if not _pane_busy(pane):
+            return True
+        time.sleep(poll_s)
+        waited += poll_s
+    return False
+
+
+def _deliver_to_sala(sala: str, text: str, confirm_s: float = 8.0) -> bool:
+    """Entrega o input na sala E confirma que pousou (Frente 0, buraco 3): manda
+    `send-keys -l` + Enter e espera a sala VIRAR busy (= o turno começou). Se não
+    confirmar no orçamento, REENVIA 1× e confirma de novo. Retorna True se o turno
+    de fato arrancou; False se, após 2 tentativas, nada começou — aí o chamador faz
+    barulho (não engole a falha como antes). Pré-condição: pane ocioso (porteiro)."""
+    for _attempt in (1, 2):
+        _tmux("send-keys", "-t", sala, "-l", text)
+        _tmux("send-keys", "-t", sala, "Enter")
+        waited = 0.0
+        while waited < confirm_s:
+            time.sleep(1.0)
+            waited += 1.0
+            pane = _tmux("capture-pane", "-t", sala, "-p").stdout
+            if _pane_busy(pane):
+                return True
+    return False
+
+
 def _monitor_sala(state_path: Path, sala: str, kobe_home: Path) -> int:
     """Fica vivo observando a sala DURANTE o turno (o worker não morre no launch).
 
@@ -978,10 +1027,22 @@ def _monitor_sala(state_path: Path, sala: str, kobe_home: Path) -> int:
     hb_interval = _heartbeat_interval()
     saw_busy = False
     idle_streak = 0
+    my_pid = os.getpid()  # owner-check (Frente 0): sou eu ainda o worker da sessão?
     # Margem de boot: o claude leva alguns segundos pra subir; sem isso o monitor
     # poderia ver "idle" no boot e encerrar antes do turno começar.
     time.sleep(_SALA_POLL_SECONDS)
     while True:
+        # Owner-check (Frente 0, buraco 2): se um worker mais novo assumiu a sessão
+        # (um resume disparou outro worker, que regravou `worker_pid`), este monitor
+        # VELHO se cala e sai — não fica gravando status/last_text por cima do estado
+        # do novo. Combinado com o flock do _patch_state, mata o lost-update.
+        try:
+            owner = _read_state(state_path).get("worker_pid")
+            if owner not in (None, my_pid):
+                logger.info("monitor velho cedendo a sessão ao worker %s (eu=%s)", owner, my_pid)
+                return 0
+        except Exception:  # noqa: BLE001 — owner-check é defensivo; na dúvida segue
+            pass
         if not _tmux_has_session(sala):
             _patch_state(state_path, status="dead", exit_code=-1,
                          last_text="sala tmux caiu (morte detectada pelo monitor).")
@@ -1043,12 +1104,39 @@ def run_sala(*, state_path: Path, mode: str, kobe_home: Path) -> int:
             return 1
         pending = (state.get("pending_input") or "").strip()
         if pending:
-            # send-keys em dois tempos: texto literal (-l), depois Enter. Provado (T2).
-            _tmux("send-keys", "-t", sala, "-l", pending)
-            _tmux("send-keys", "-t", sala, "Enter")
-        _patch_state(state_path, status="running", pending_input=None,
-                     last_activity=_now_iso(),
-                     turn_count=(state.get("turn_count") or 0) + 1)
+            # (1) Porteiro de prontidão: não digita numa TUI ocupada.
+            if not _wait_pane_idle(sala):
+                # Seguiu ocupada — NÃO digita às cegas e NÃO perde o input.
+                _notify_error(
+                    kobe_home,
+                    f"🟡 [coder] sala `{sala}` seguiu ocupada — não injetei tua "
+                    f"mensagem (pra não perdê-la numa TUI processando). Ela está "
+                    f"preservada; manda o resume de novo quando a sala estiver parada.",
+                )
+                _patch_state(state_path, status="idle", last_activity=_now_iso())
+                return 0  # pending_input PRESERVADO (não foi limpo)
+            # (2) Entrega + confirmação de que o turno arrancou (reenvia 1×).
+            if not _deliver_to_sala(sala, pending):
+                # Barulho quando falha (o oposto do silêncio do incidente): a sala
+                # está viva mas o input não pousou após 2 tentativas.
+                _notify_error(
+                    kobe_home,
+                    f"🔴 [coder] tua mensagem NÃO pousou na sala `{sala}` após 2 "
+                    f"tentativas (o turno não arrancou). A sala está viva e o input "
+                    f"está preservado — tenta o resume de novo, ou abre a sala no "
+                    f"Desktop pra ver o que travou.",
+                )
+                _patch_state(state_path, status="idle", last_activity=_now_iso())
+                return 1  # pending_input PRESERVADO pra retry
+            # Entregou e confirmou: consome o input e segue pro monitor.
+            _patch_state(state_path, status="running", pending_input=None,
+                         last_activity=_now_iso(),
+                         turn_count=(state.get("turn_count") or 0) + 1)
+        else:
+            # Resume sem input novo ("continue de onde parou") — comportamento antigo.
+            _patch_state(state_path, status="running", pending_input=None,
+                         last_activity=_now_iso(),
+                         turn_count=(state.get("turn_count") or 0) + 1)
         return _monitor_sala(state_path, sala, kobe_home)
 
     # mode == "start"

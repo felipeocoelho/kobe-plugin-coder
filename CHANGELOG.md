@@ -45,6 +45,23 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 **Reversão:** aditiva — `git revert`. Sessões já criadas sem `slug` seguem no fallback; nada quebra.
 
+### Frente 0 — blindar o `resume` (silêncio-quando-falha → barulho-quando-falha)
+
+**Operador pediu:** consertar o resume que falha em silêncio — o "go" do operador não pousava na sala e ninguém percebia (travou uma sala por ~39 min). Três buracos: sem porteiro de prontidão antes do `send-keys`, sem confirmação de leitura pós-`send-keys`, estado sem trava.
+
+**Por quê:** o caminho `resume` só checava se a sala existia, mandava `send-keys` fire-and-forget e seguia. Teclas mandadas a uma TUI ocupada caíam no vão; nada confirmava a entrega; e `_patch_state` sem lock deixava um monitor de turno anterior clobberar o estado do resume (foi o que travou `turn_count` em 1). A garantia do fluxo §10 (operador aprova → resume) dependia disso.
+
+**Foi feito (em `coder_worker.py`):**
+- **Porteiro de prontidão** (`_wait_pane_idle`): espera a sala ficar ociosa antes de digitar; se seguir ocupada, NÃO digita às cegas e **preserva** o `pending_input` pra retry, avisando o operador.
+- **Confirmação de entrega** (`_deliver_to_sala`): após `send-keys`, espera a sala VIRAR busy (= o turno arrancou); reenvia 1× se não confirmar; se após 2 tentativas nada começar, faz **barulho** (`kobe-notify` 🔴) e preserva o input — a falha deixa de ser silenciosa.
+- **Lock de estado**: `flock` exclusivo no read-modify-write inteiro do `_patch_state` (fecha o lost-update) + **owner-check** no `_monitor_sala` (um monitor de worker antigo se cala quando um worker novo assume a sessão, detectado por `worker_pid`).
+
+**Testes (ambiente de desenvolvimento):** `py_compile`; teste de concorrência do `flock` reproduzindo o cenário do incidente (um writer de `turn_count` monotônico + spam de `status` concorrente → `turn_count` NÃO regride, 400/400); `_wait_pane_idle` (idle / busy-depois-idle / sempre-busy) e `_deliver_to_sala` (confirma quando o turno arranca; reenvia 1× e faz barulho quando não pousa) com `_tmux` mockado. Todos verdes.
+
+**Commits:** ver `git log`.
+
+**Reversão:** aditiva — `git revert`. Volta ao resume fire-and-forget anterior.
+
 ## [0.8.0] — 2026-06-24 — Incidente: dispatch-sem-sala + integridade de sessão + deadlock de aprovação
 
 > Uma sessão anterior do Coder rodou **invisível** (sem sala anexável) e morreu no meio por limite de gasto, deixando trabalho sem sinal claro de onde parou. Esta leva corrige a causa estrutural (BUG 1), a integridade de sessão interrompida (BUG 2), o deadlock de aprovação do plano (BUG 0) e reconcilia o trabalho órfão.
