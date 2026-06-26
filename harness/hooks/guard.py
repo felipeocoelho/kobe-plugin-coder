@@ -30,7 +30,7 @@ Gates (liga/desliga por env — reversibilidade):
 - **Gate PARA-e-espera-OK** (`KOBE_CODER_GATE_PLAN`, default on) — antes da
   aprovação, bloqueia Edit/Write de código de produção (fora de `.local/`), §10.
 - **HALT** — `halted: true` no state → nega toda ação mutante até arbitragem
-  (§7.1). Exceção: helpers de comunicação puros (a sessão precisa poder pedir
+  (§5.1). Exceção: helpers de comunicação puros (a sessão precisa poder pedir
   socorro mesmo travada).
 
 Fail-CLOSED quando `--state` é dado mas o arquivo não parseia (suspeita de
@@ -530,7 +530,7 @@ def main() -> int:
             reason = state.get("halt_reason") or "parada dura sinalizada"
             _deny(
                 f"[guard:HALT] Sessão em HALT ({reason}). Nenhuma ação mutante até "
-                "o operador arbitrar (§7.1). Você ainda pode usar kobe-notify pra "
+                "o operador arbitrar (§5.1). Você ainda pode usar kobe-notify pra "
                 "explicar; depois encerre o turno aguardando a decisão dele."
             )
 

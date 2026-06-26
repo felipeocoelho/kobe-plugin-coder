@@ -57,7 +57,7 @@ Outras subcomandos:
 - `resume --session <uuid> --input "<resposta-do-operador>"`
 - `list` (lista sessões do tópico atual, JSON no stdout)
 - `status --session <uuid>` (mostra estado de uma sessão específica)
-- `halt --session <uuid> --reason "..."` (trava a sessão — HALT §7.1)
+- `halt --session <uuid> --reason "..."` (trava a sessão — HALT §5.1)
 - `merge --session <uuid>` (mescla a worktree da sessão na árvore principal, se isolamento ligado)
 
 O `run_remote.py` cuida do fork em background — você **não bloqueia esperando** o claude remoto terminar. Ele retorna imediato com `{"session_id": "...", "status": "running", "log": "...", ...}` no stdout (JSON).
@@ -72,7 +72,7 @@ A sessão remota roda sob travas de código (hook `guard`): deny-list de destrut
   ```
   **Sem `--approve-plan`, o gate continua bloqueando a edição de código e a sessão trava sem conseguir trabalhar.** A detecção da aprovação é teu julgamento (LLM); a liberação do gate é código. Na dúvida se a mensagem é aprovação ou só comentário, NÃO passe a flag (melhor a sessão pedir de novo que codar sem OK).
 - **Tarefa trivial / operador pediu pra pular o plano.** Se a tarefa já vem com "pula o plano" ou é um 1-liner óbvio, passe `--approve-plan` **no start** (`start ... --approve-plan`) — libera o gate desde o começo.
-- **Arbitragem de conflito (HALT).** Se a sessão entrou em HALT (conflito de regras, §7.1) e o operador arbitrou, retome com `--clear-halt` (pode combinar com `--approve-plan`).
+- **Arbitragem de conflito (HALT).** Se a sessão entrou em HALT (conflito de regras, §5.1) e o operador arbitrou, retome com `--clear-halt` (pode combinar com `--approve-plan`).
 - **Aprovação do deploy público.** Quando a sessão parou no passo final de deploy (push pro remote público, gated) e o operador aprova publicar, retome com `--approve-deploy`. Só passe quando o operador claramente autorizou tocar o usuário público.
 
 `--approve-plan` é **sticky**: uma vez aprovado, segue aprovado nos resumes seguintes daquela sessão.

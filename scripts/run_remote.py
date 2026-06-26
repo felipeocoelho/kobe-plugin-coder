@@ -530,7 +530,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         # bloqueada (hook guard) até o plano ser aprovado. `--approve-plan` no
         # start pré-aprova (operador mandou tarefa trivial / pulou o plano).
         "plan_approved": bool(getattr(args, "approve_plan", False)),
-        # HALT (§7.1): conflito de regras irreconciliável trava a sessão.
+        # HALT (§5.1): conflito de regras irreconciliável trava a sessão.
         "halted": False,
         "halt_reason": None,
         # Gate de deploy (§10): push pro remote público exige OK. Liberado por
@@ -616,7 +616,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     # Aprovação do deploy público (§10): libera o gate do push pro remote público.
     if getattr(args, "approve_deploy", False):
         state["deploy_approved"] = True
-    # Arbitragem de conflito (§7.1): operador resolveu o HALT → destrava.
+    # Arbitragem de conflito (§5.1): operador resolveu o HALT → destrava.
     if getattr(args, "clear_halt", False):
         state["halted"] = False
         state["halt_reason"] = None
@@ -812,7 +812,7 @@ def cmd_merge(args: argparse.Namespace) -> int:
 
 
 def cmd_halt(args: argparse.Namespace) -> int:
-    """Marca uma sessão como HALTED (§7.1) — o hook guard passa a negar toda
+    """Marca uma sessão como HALTED (§5.1) — o hook guard passa a negar toda
     ação mutante até o operador arbitrar (`resume --clear-halt`). Pode ser
     acionado pelo operador ou pela própria sessão (via helper) ao detectar um
     conflito de regras irreconciliável.
@@ -910,7 +910,7 @@ def main() -> int:
     st.add_argument("--session", required=True)
     st.set_defaults(func=cmd_status)
 
-    h = sub.add_parser("halt", help="trava uma sessão (HALT §7.1) até arbitragem")
+    h = sub.add_parser("halt", help="trava uma sessão (HALT §5.1) até arbitragem")
     h.add_argument("--session", required=True, help="uuid ou short-id da sessão")
     h.add_argument("--reason", default="", help="motivo do HALT (conflito de regras, etc.)")
     h.set_defaults(func=cmd_halt)

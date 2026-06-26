@@ -41,6 +41,7 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 - Nova **§13** no `CONTRACT.md`: isolamento por worktree + merge de sessões simultâneas — descreve em prosa o método já implementado (serializado por lock, caminho de volta registrado antes, recusa árvore suja/detached/branch errada, nunca auto-resolve conflito). Responde à pergunta "como o Coder lida com sessões simultâneas".
 - `prompts/remote-system.md`: reforço do invariante (§12) no system prompt da sessão remota.
 - `CONTRACT.md` §11 (resumo operacional): dois itens novos apontando §12 e §13.
+- **Reconciliação de numeração:** as 10 citações `§7.1` (HALT/conflito, em `guard.py`, `coder.md`, `run_remote.py`, `README.md` e na nota do §8) reapontadas para **`§5.1`** — onde o conflito→HALT de fato vive no contrato (`§7.1` colidiria com `§7`=Baselines). As citações `§13.1` agora resolvem na nova §13. Auditoria fecha: citação ↔ seção batem.
 
 **Testes (ambiente de desenvolvimento):** `tests/portability_guard.sh` (sem regressão); verificação de que as citações `§13.1` do código agora têm seção correspondente no contrato. Mudança de doc/prompt, sem runtime — risco operacional ~zero, rollback = `git revert`.
 

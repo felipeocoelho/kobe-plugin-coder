@@ -173,7 +173,7 @@ A sessão remota roda sob travas de código reais — o hook `harness/hooks/guar
 | Deny-list | `KOBE_CODER_GATE_DENYLIST=on` | Bloqueia destrutivo duro (rm recursivo, force/mirror/delete push, reset --hard, DROP/TRUNCATE/DELETE, publish, systemctl stop/kill, etc.) e indireção (base64\|sh, eval). A sessão pede OK ao operador. |
 | Changelog | `KOBE_CODER_GATE_CHANGELOG=on` | `git commit` exige um arquivo de changelog no staged diff. Escape auditável: `[wip]` na mensagem (commit-rede-de-segurança intermediário). |
 | PARA-e-espera | `KOBE_CODER_GATE_PLAN=on` | Antes da aprovação do plano, nega edição de código de produção (rascunhos em `.local/` são livres). Liberado com `--approve-plan` no resume. |
-| HALT | (estado) | Conflito de regras (§7.1) → nega ação mutante até `--clear-halt`. Comunicação (`kobe-notify`) segue permitida. |
+| HALT | (estado) | Conflito de regras (§5.1) → nega ação mutante até `--clear-halt`. Comunicação (`kobe-notify`) segue permitida. |
 
 O path do state vai no **argv do hook**, não no env da sessão — a sessão não alcança o próprio cadeado. Os gates desligam por env (reversibilidade) sem reverter código.
 
