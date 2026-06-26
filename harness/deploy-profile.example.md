@@ -30,6 +30,19 @@
 - **<repositório público>** — a fonte de instalação pra qualquer pessoa. Tocar
   nisso = afetar usuário público.
 
+## Variável de ambiente da raiz de dev (obrigatória pro rito de cwd)
+
+> O Coder resolve a cwd da sessão sob a **árvore de desenvolvimento**, nunca em
+> produção (§9.2 do `CONTRACT.md`). A raiz dessa árvore vem de uma variável de
+> ambiente — **nunca** de um caminho fixo no código/contrato público.
+
+- **`KOBE_CODER_DEV_ROOT`** — raiz da sua árvore de desenvolvimento (a pasta-mãe
+  onde moram os checkouts de dev dos seus projetos). Defina no `.env` do bot
+  (junto de `KOBE_CODER_PUBLIC_REMOTES` etc.). Exemplo de valor (ajuste ao seu):
+  `KOBE_CODER_DEV_ROOT=/caminho/para/sua/arvore/de/dev`. O dispatcher identifica
+  o projeto, resolve a pasta dele sob essa raiz, e só então seta a cwd. Se a
+  variável não estiver setada, o Coder **pergunta** em vez de chutar.
+
 ## Estágios e a ordem do deploy
 
 > A sequência exata, sempre via git (nunca rsync). Exemplo:

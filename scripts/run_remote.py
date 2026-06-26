@@ -200,6 +200,32 @@ def _kobe_home() -> Path:
     return Path(raw).expanduser().resolve()
 
 
+def _warn_if_prod_cwd(origin_cwd: Path, kobe_home: Path) -> Optional[str]:
+    """Rede de segurança (Frente 1): a sessão deveria trabalhar na ÁRVORE DE DEV,
+    não em produção. Se `origin_cwd` cai sob `$KOBE_HOME` (a raiz de produção) e
+    NÃO é a base de worktrees (que mora sob `user-data` por design e é legítima),
+    retorna um aviso. NÃO bloqueia — só sinaliza (o operador pode ter mesmo querido
+    apontar pra prod). O caminho certo é resolver o cwd sob `$KOBE_CODER_DEV_ROOT`
+    no dispatch (ver claude/agents/coder.md)."""
+    try:
+        oc = str(origin_cwd.resolve())
+        kh = str(kobe_home.resolve())
+    except Exception:  # noqa: BLE001
+        return None
+    wt_base = str((kobe_home / "user-data").resolve())
+    if oc == wt_base or oc.startswith(wt_base + os.sep):
+        return None  # worktree/estado sob user-data não é "prod por engano"
+    if oc == kh or oc.startswith(kh + os.sep):
+        dev_root = os.environ.get("KOBE_CODER_DEV_ROOT", "").strip()
+        hint = (
+            f" A árvore de dev é `$KOBE_CODER_DEV_ROOT`"
+            + (f" (`{dev_root}`)" if dev_root else " — que NÃO está setado")
+            + "; o certo é resolver o cwd lá, não em produção."
+        )
+        return f"a cwd `{oc}` está sob a raiz de PRODUÇÃO (`{kh}`)." + hint
+    return None
+
+
 def _topic_key() -> str:
     """Pasta-chave da sessão. `general` se sem thread, senão o thread_id."""
     raw = os.environ.get("KOBE_THREAD_ID", "").strip()
@@ -370,6 +396,21 @@ def cmd_start(args: argparse.Namespace) -> int:
     if not task:
         return _emit({"error": "tarefa vazia"}, error=True)
 
+    # Rede de segurança (Frente 1): avisa (não bloqueia) se a sessão foi apontada
+    # pra raiz de produção em vez da árvore de dev. Determinístico — emite direto
+    # via kobe-notify (run_remote herda o env do bot) e devolve no payload.
+    cwd_warning = _warn_if_prod_cwd(cwd, kobe_home)
+    if cwd_warning:
+        notify_bin = kobe_home / "bot" / "bin" / "kobe-notify"
+        if notify_bin.is_file() and os.environ.get("KOBE_TELEGRAM_BOT_TOKEN") and os.environ.get("KOBE_CHAT_ID"):
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    [str(notify_bin),
+                     f"⚠️ [coder] atenção ao cwd: {cwd_warning} Disparando mesmo "
+                     f"assim — confira se era essa a intenção."],
+                    timeout=15, capture_output=True,
+                )
+
     # Aviso (não bloqueio) de pasta ocupada — outra instância Claude Code já
     # está mexendo nessa cwd? Retorna `warning: presence_conflict` e não
     # dispara. Subagente coder propaga via kobe-notify pro operador decidir.
@@ -523,6 +564,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "state_path": str(state_path),
             "log_path": str(log_path),
             "worker_pid": worker_pid,
+            "cwd_warning": cwd_warning,
         }
     )
 

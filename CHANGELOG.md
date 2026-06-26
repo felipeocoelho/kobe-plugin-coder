@@ -10,6 +10,26 @@ Todas as mudanças notáveis deste projeto ficam aqui.
 
 > Auditoria do Coder contra o contrato vivo (`harness/CONTRACT.md`), fechando a folga entre o que o contrato promete e o que o `guard.py`/worker cumprem. Nada de contrato novo — audita o que existe e acrescenta só o que falta. Cinco frentes: blindar o `resume` (Frente 0), cwd default dev-first (Frente 1), aprovação agnóstica de canal forma B (Frente 2), slug no nome da sala (Frente 3), rito/invariante auto-imposto ancorado (Frente 4).
 
+### Frente 1 — cwd default na árvore de DESENVOLVIMENTO (não em produção)
+
+**Operador pediu:** o cwd default caía em produção (a instrução mandava `cwd=$KOBE_HOME` pra mudanças no framework, e `$KOBE_HOME` é prod) — risco de codar no lugar errado. Corrigir pra dev-first, com um passo **explícito** de identificação de projeto antes de setar o cwd (não assumir o framework — pode ser um plugin num subdiretório, ou outro projeto), e a raiz da árvore de dev vinda de **variável de ambiente**, nunca hardcoded.
+
+**Por quê:** a instrução `cwd=$KOBE_HOME` contradiz o contrato (§2.3/§9: trabalho e teste no ambiente de desenvolvimento). E o mapeamento projeto→pasta não é plano (um plugin mora num subdiretório do checkout de dev), então exige identificação explícita do projeto antes de resolver a pasta. O caminho concreto da árvore de dev é dado pessoal — não pode viver no contrato público.
+
+**Foi feito:**
+- `claude/agents/coder.md`: seção "Decidindo o cwd" reescrita como **rito obrigatório** — (1) identifica QUAL projeto com precisão; (2) resolve a pasta sob `$KOBE_CODER_DEV_ROOT` (verifica que existe); (3) seta a cwd; (4) PARA-e-espera se a var faltar / pasta não resolver / projeto ambíguo. "NUNCA use `$KOBE_HOME` como cwd de dev".
+- `harness/CONTRACT.md` **§9.2**: invariante portável — a cwd de trabalho é a árvore de dev; a raiz vem de `KOBE_CODER_DEV_ROOT` (variável, nunca caminho fixo embutido); identifica projeto antes; rede de segurança avisa se cair em prod.
+- `scripts/run_remote.py`: rede de segurança `_warn_if_prod_cwd` — **avisa** (kobe-notify + campo `cwd_warning` no payload), **não bloqueia**, se a sessão for apontada pra sob `$KOBE_HOME` (prod). Carve-out pra worktrees/estado sob `user-data` (legítimos, não falso-positivo).
+- `harness/deploy-profile.example.md`: documenta `KOBE_CODER_DEV_ROOT` (sem valor real — o valor é da camada D/`.env`, gitignored).
+
+**Reconciliação cwd↔worktree:** a rede de segurança checa a cwd de **origem** (intenção do operador), não a worktree (que mora sob `user-data` por design) — sem falso-positivo. Corrigir o default pra dev deixa a worktree *mais* correta (ramifica do dev, merge volta pro dev).
+
+**Testes (ambiente de desenvolvimento):** `py_compile`; unit do `_warn_if_prod_cwd` (prod→avisa, `user-data`→silencia, dev→silencia, raiz-de-prod→avisa, cita `DEV_ROOT` quando setado); `portability_guard.sh` (sem path pessoal no tree público — o valor de `DEV_ROOT` fica fora). Todos verdes.
+
+**Commits:** ver `git log`. **Runtime:** requer `KOBE_CODER_DEV_ROOT` no `.env` do bot (config de deploy, gitignored).
+
+**Reversão:** aditiva — `git revert`. O warn-net é não-bloqueante; reverter volta à instrução anterior.
+
 ### Frente 4 — invariante de dispatch + isolamento/merge documentados no contrato
 
 **Operador pediu:** que "disparar uma sessão Coder pra fazer X" seja sinônimo **auditável** de o contrato inteiro ser honrado à risca — não uma promessa — e que o método de merge para sessões simultâneas (o exemplo dele) esteja escrito, não só no código.

@@ -254,6 +254,10 @@ O OK do operador ao passo público é **autorização, não delegação a um hum
 
 A **autorização nasce fora da sessão** (pelo canal de controle do motor — a sessão não pode setar a própria flag, senão se auto-aprovaria; é a mesma trava dupla do gate de plano, §10). A confiabilidade de essa autorização **chegar** à sessão é garantida pelo caminho de retomada blindado (porteiro de prontidão + confirmação de entrega + lock de estado) — antes ela podia se perder em silêncio. Aprovar **digitando dentro da própria sala**, com prova de operador (segredo de uso único fora do alcance da IA), é uma evolução possível e parqueada para um ciclo dedicado — não enfraquece nada aqui, só muda *onde* o operador digita o OK.
 
+### 9.2 A cwd de trabalho é a árvore de DESENVOLVIMENTO
+
+A sessão trabalha e testa no ambiente de **desenvolvimento** (o lab, §2.3) — **nunca em produção por default**. Antes de abrir a sessão, o dispatcher segue um rito explícito: **(1)** identifica com precisão qual projeto a tarefa toca (não assume um projeto "óbvio" — pode ser o framework, um plugin num subdiretório, ou outro repo); **(2)** resolve a pasta desse projeto sob a raiz da árvore de dev, que vem de uma **variável de ambiente** (`KOBE_CODER_DEV_ROOT`) — nunca de um caminho fixo embutido (o caminho concreto é dado de usuário, camada D / `.env`, fora do harness público); **(3)** seta a cwd ali; **(4)** se a variável faltar, a pasta não resolver, ou o projeto for ambíguo, **para e pergunta** ao operador. Uma rede de segurança avisa (sem bloquear) se a sessão acabar apontada para a raiz de produção por engano. É a aplicação direta do §1 (reversibilidade) e do §2.3 (testar no lab) ao ponto onde mais se erra: o lugar onde a sessão começa a codar.
+
 ---
 
 ## 10. A metodologia de execução (o ritual)

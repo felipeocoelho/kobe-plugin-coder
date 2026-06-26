@@ -83,16 +83,16 @@ O default é o **Procedimento 1** (turno padrão, rito de quatro etapas inline).
 
 **Trava anti-gatilho-fantasma (§4.2):** mencionar "esforço máximo / ultracode" *descrevendo o conceito*, *perguntando* sobre ele, ou *projetando* algo **não** é ordem de acioná-lo. Falar sobre a ferramenta nunca é mandar usá-la. Na dúvida, **não** passe `--effort-max` — rode no Procedimento 1 (o rito de quatro etapas roda sempre, mesmo no P1). Subir pro modo caro por engano queima token à toa.
 
-## Decidindo o `cwd`
+## Decidindo o `cwd` — rito obrigatório de identificação de projeto
 
-Leia o `CLAUDE.md` global do operador (`$HOME/.claude/CLAUDE.md` se existir) e o `CLAUDE.md` do Kobe (`$KOBE_HOME/CLAUDE.md`) pra entender a convenção de pastas dele. Padrão comum:
+A cwd da sessão é onde ela vai **codar**. Errar aqui = codar no lugar errado (no pior caso, em produção). Por isso a escolha do cwd segue um **rito explícito**, nesta ordem — e **nunca assuma o projeto** (99% das vezes pode ser o Kobe, mas pode não ser: um pedido sobre um plugin, um projeto novo, ou outro repo qualquer):
 
-- Projetos em desenvolvimento moram em `$HOME/projetos/<nome>` ou similar definido no CLAUDE.md.
-- Se a tarefa menciona um projeto existente, verifique a pasta existe antes de despachar.
-- Se é projeto novo: a sessão remota cria a pasta. Você dispara com `cwd=<pasta-mãe>` e a tarefa dela inclui "crie a pasta `<nome>` e trabalhe lá dentro".
-- Para mudanças no Kobe-base, `cwd=$KOBE_HOME` (mas confirme com o operador — pode ser que ele tenha um clone de dev separado).
+1. **Identifique QUAL projeto** a tarefa toca, com precisão. Não confunda "trabalhar no Kobe-base" com "trabalhar num plugin do Kobe" (que mora num subdiretório próprio dentro do checkout) nem com outro projeto. Se a tarefa não deixa claro o projeto, **pergunte** antes de despachar.
+2. **Resolva a pasta desse projeto na ÁRVORE DE DESENVOLVIMENTO.** A raiz da árvore de dev vem da variável de ambiente **`$KOBE_CODER_DEV_ROOT`** — nunca de um caminho fixo digitado. A pasta do projeto é derivada dela: o Kobe-base no checkout de dev sob `$KOBE_CODER_DEV_ROOT`; um plugin, no subdiretório real dele dentro desse checkout; um projeto novo, na pasta-mãe sob `$KOBE_CODER_DEV_ROOT` (a sessão cria a subpasta combinada e você dispara com `cwd=<pasta-mãe>`). **Verifique que a pasta existe** antes de despachar.
+3. **Set o `cwd`** para a pasta resolvida.
+4. **PARE e pergunte ao operador se:** `$KOBE_CODER_DEV_ROOT` não estiver setado, a pasta não resolver, ou a identificação do projeto for ambígua. Não chute, não caia em produção por default.
 
-Quando incerto sobre o cwd, pergunte ao operador. Não chute.
+**NUNCA use `$KOBE_HOME` como cwd de desenvolvimento** — `$KOBE_HOME` é a raiz de **produção**. Trabalho e teste acontecem na árvore de dev (§2.3/§9 do contrato). Se uma sessão acabar apontada pra produção por engano, o `run_remote.py` emite um **aviso** (rede de segurança, não bloqueio) — mas o certo é resolver o cwd na árvore de dev já no dispatch. O caminho concreto da árvore de dev é dado pessoal do operador (camada D / `.env`), fora do que é versionado — por isso vem da variável, nunca embutido aqui.
 
 ## Após disparar
 
